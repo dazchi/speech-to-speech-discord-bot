@@ -136,6 +136,7 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         cancel_scope: CancelScope | None = None,
         speculative_turns: SpeculativeTurnTracker | None = None,
         detect_llm_output_language: bool = False,
+        t2s: bool = False,
     ) -> None:
         self.cancel_scope = cancel_scope
         self.speculative_turns = speculative_turns
@@ -163,6 +164,7 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         self.gen_kwargs = gen_kwargs or {}
         self._mlx_ref_audio_cache: dict[str, Any] = {}
         self._mlx_temp_ref_audio_files: set[str] = set()
+        self._t2s_converter = self._load_t2s_converter() if t2s else None
 
         self.backend = "mlx" if platform == "darwin" else "faster_qwen3_tts"
         self.streaming_chunk_size = self._resolve_streaming_chunk_size(streaming_chunk_size)
@@ -299,6 +301,16 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
                 f"{quantization!r}. Supported values: {', '.join(VALID_GGML_QUANTIZATIONS)}"
             )
         return value
+
+    @staticmethod
+    def _load_t2s_converter() -> Any:
+        try:
+            from opencc import OpenCC
+        except ImportError as exc:
+            raise ImportError(
+                "qwen3_tts_t2s requires OpenCC. Install with: pip install 'speech-to-speech[t2s]'"
+            ) from exc
+        return OpenCC("t2s")
 
     def _normalize_optional_path(self, value: Any) -> Path | None:
         if value is None or not str(value).strip():
@@ -869,6 +881,10 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         request_language = self._language_for_utterance(language_code, tts_input.selected_language)
 
         console.print(f"[green]ASSISTANT: {text}")
+
+        t2s_converter = getattr(self, "_t2s_converter", None)
+        if t2s_converter is not None:
+            text = t2s_converter.convert(text)
 
         logger.info("Qwen3-TTS language=%s (input_code=%s)", request_language, language_code)
         store = getattr(self, "turn_latency_store", None)
