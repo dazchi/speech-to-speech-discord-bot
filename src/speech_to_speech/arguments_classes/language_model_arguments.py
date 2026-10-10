@@ -26,7 +26,8 @@ class LanguageModelHandlerArguments(LanguageModelBaseArguments):
     llm_gen_temperature: float = field(
         default=0.0,
         metadata={
-            "help": "Controls the randomness of the output. Set to 0.0 for deterministic (repeatable) outputs. Default is 0.0."
+            "help": "Controls the randomness of the output. Set to 0.0 for deterministic (repeatable) outputs. "
+            "With the mlx-lm backend, any value above 0.0 enables sampling. Default is 0.0."
         },
     )
     llm_gen_do_sample: bool = field(

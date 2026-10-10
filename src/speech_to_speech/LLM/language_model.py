@@ -78,6 +78,7 @@ try:
     from mlx_lm import generate as mlx_generate
     from mlx_lm import load as mlx_load
     from mlx_lm import stream_generate as mlx_stream_generate
+    from mlx_lm.sample_utils import make_sampler as mlx_make_sampler
 
     from speech_to_speech.utils.mlx_lock import MLXLockContext
 
@@ -835,6 +836,8 @@ class LanguageModelHandler(BaseLanguageModelHandler):
                 raise ImportError("mlx_lm is required for the 'mlx' backend. Install with: pip install mlx-lm")
             self.model, self.tokenizer = mlx_load(model_name)  # type: ignore[assignment, misc]
             self.gen_kwargs = gen_kwargs
+            # temp=0.0 keeps mlx-lm's default greedy decoding.
+            self._mlx_sampler = mlx_make_sampler(temp=float(gen_kwargs.get("temperature") or 0.0))
         else:
             self.torch_dtype = getattr(torch, torch_dtype)
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)  # type: ignore[assignment]
@@ -883,6 +886,7 @@ class LanguageModelHandler(BaseLanguageModelHandler):
                     self.tokenizer,  # type: ignore[arg-type]
                     chat_prompt,  # type: ignore[arg-type]
                     max_tokens=self.gen_kwargs["max_new_tokens"],
+                    sampler=getattr(self, "_mlx_sampler", None),
                 )
                 if ctx.prefetch_transaction is not None:
 
