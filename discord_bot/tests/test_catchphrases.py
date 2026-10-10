@@ -9,7 +9,7 @@ from discord_bot.realtime import RealtimeSession
 
 def test_no_catchphrases_means_no_rule_and_no_note():
     config = BotConfig(discord_token="x")
-    assert "catchphrase" not in config.session_instructions([])
+    assert "Your catchphrases:" not in config.session_instructions([])
     assert config.catchphrase_note(True) is None
 
 
