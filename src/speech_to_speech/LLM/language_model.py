@@ -46,7 +46,13 @@ from speech_to_speech.LLM.compaction_prompt import CompactGenerateFn, build_comp
 from speech_to_speech.LLM.text_prompt import build_text_system_prompt
 from speech_to_speech.LLM.tool_call.function_call import extract_function_calls_from_text
 from speech_to_speech.LLM.tool_call.function_tool import FunctionTool
-from speech_to_speech.LLM.tool_call.tool_prompt import END_CODE, ENTER_CODE, build_block_regex, build_tool_system_prompt
+from speech_to_speech.LLM.tool_call.tool_prompt import (
+    END_CODE,
+    ENTER_CODE,
+    build_block_regex,
+    build_tool_system_prompt,
+    tool_calls_as_code_blocks,
+)
 from speech_to_speech.LLM.utils import (
     image_url_to_pil,
     language_name_for_prompt,
@@ -870,7 +876,7 @@ class LanguageModelHandler(BaseLanguageModelHandler):
         runtime_config: RuntimeConfig | None = None,
         response: RealtimeResponseCreateParams | None = None,
     ) -> Iterator[LLMResponseChunk]:
-        chat_messages = chat.to_transformers_chat()
+        chat_messages = tool_calls_as_code_blocks(chat.to_transformers_chat())
         chat_input = self.tokenizer.apply_chat_template(chat_messages, tokenize=True)
         ctx.input_tokens += len(chat_input if isinstance(chat_input, list) else chat_input["input_ids"])  # type: ignore[index]
         logger.debug("Prompt token count: %d", ctx.input_tokens)
@@ -1061,7 +1067,7 @@ class VisionLanguageModelHandler(BaseLanguageModelHandler):
         runtime_config: RuntimeConfig | None = None,
         response: RealtimeResponseCreateParams | None = None,
     ) -> Iterator[LLMResponseChunk]:
-        prepared = chat.to_transformers_chat()
+        prepared = tool_calls_as_code_blocks(chat.to_transformers_chat())
         if self.backend == "mlx":
             images, formatted_prompt = self._prepare_mlx_vlm_inputs(prepared)
             ctx.input_tokens += len(self.tokenizer.encode(formatted_prompt))

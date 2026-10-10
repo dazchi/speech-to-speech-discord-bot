@@ -7,6 +7,7 @@ The prompt is rendered from a Jinja2 template and relies on
 """
 
 import re
+from typing import Any
 
 from jinja2 import Template
 
@@ -107,3 +108,48 @@ def build_block_regex(
     '<code>.*?</code>'
     """
     return f"{re.escape(enter_code)}.*?{re.escape(end_code)}"
+
+
+def format_tool_call_block(
+    name: str,
+    arguments: dict[str, Any],
+    enter_code: str = ENTER_CODE,
+    end_code: str = END_CODE,
+) -> str:
+    """Render a tool call in the same delimited format the tool prompt asks for.
+
+    >>> format_tool_call_block("web_search", {"query": "weather"})
+    "<code>web_search(query='weather')</code>"
+    """
+    args = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
+    return f"{enter_code}{name}({args}){end_code}"
+
+
+def tool_calls_as_code_blocks(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rewrite structured assistant ``tool_calls`` as ``<code>`` text.
+
+    Chat templates render past tool calls in the model's native format (e.g.
+    Qwen's ``<tool_call>`` XML), which contradicts the ``<code>`` format the tool
+    prompt asks for; models then copy the history and stop emitting parseable
+    calls. Keeping history in the prompted format avoids that drift.
+
+    Spoken text stored just before a call (e.g. "Let me check.") is merged into
+    the same assistant turn: as separate turns it teaches the model to end its
+    reply after the preamble, so the call is never generated.
+    """
+    converted: list[dict[str, Any]] = []
+    for message in messages:
+        tool_calls = message.get("tool_calls")
+        if message.get("role") == "assistant" and tool_calls:
+            blocks = "".join(
+                format_tool_call_block(call["function"]["name"], call["function"]["arguments"]) for call in tool_calls
+            )
+            content = f"{message.get('content') or ''}{blocks}"
+            previous = converted[-1] if converted else None
+            if previous and previous.get("role") == "assistant" and isinstance(previous.get("content"), str):
+                converted[-1] = {**previous, "content": f"{previous['content']}{content}"}
+            else:
+                converted.append({"role": "assistant", "content": content})
+        else:
+            converted.append(message)
+    return converted
