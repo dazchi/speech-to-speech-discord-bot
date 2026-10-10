@@ -152,6 +152,9 @@ class StreamContext(BaseModel):
     block_regex: Optional[str] = None
     enter_code: Optional[str] = None
     end_code: Optional[str] = None
+    # Tools exist but this response has tool_choice="none": strip any tool-call blocks the model
+    # still writes (e.g. copied from history) instead of speaking them, and do not run them.
+    discard_tool_calls: bool = False
     input_tokens: int = 0
     sentence_batch: list[str] = Field(default_factory=list)
     turn_id: str | None = None
@@ -298,6 +301,9 @@ class BaseLanguageModelHandler(BaseHandler[LLMIn, LLMOut], ABC):
 
         build_system_prompt = build_voice_system_prompt if wants_audio else build_text_system_prompt
 
+        block_regex: str | None
+        enter_code: str | None
+        end_code: str | None
         if function_tools and tool_choice != "none":
             tool_section = build_tool_system_prompt(function_tools, text_only=not wants_audio)
             full_instructions = build_system_prompt(
@@ -308,11 +314,15 @@ class BaseLanguageModelHandler(BaseHandler[LLMIn, LLMOut], ABC):
             block_regex = build_block_regex()
             enter_code = ENTER_CODE
             end_code = END_CODE
+            discard_tool_calls = False
         else:
             full_instructions = build_system_prompt(instructions or "", language_name=language_name)
-            block_regex = None
-            enter_code = None
-            end_code = None
+            # With tools disabled for this response, still recognize tool-call blocks so they are
+            # removed from the output rather than spoken.
+            discard_tool_calls = bool(function_tools)
+            block_regex = build_block_regex() if discard_tool_calls else None
+            enter_code = ENTER_CODE if discard_tool_calls else None
+            end_code = END_CODE if discard_tool_calls else None
 
         chat.add_item(make_system_message(full_instructions))
 
@@ -321,6 +331,7 @@ class BaseLanguageModelHandler(BaseHandler[LLMIn, LLMOut], ABC):
             ctx.block_regex = block_regex
             ctx.enter_code = enter_code
             ctx.end_code = end_code
+            ctx.discard_tool_calls = discard_tool_calls
 
     def _process_printable_text(
         self,
@@ -375,6 +386,9 @@ class BaseLanguageModelHandler(BaseHandler[LLMIn, LLMOut], ABC):
             complete_block = code_and_after[:block_end]
             printable_text = code_and_after[block_end:]
             _, func_calls = extract_function_calls_from_text(complete_block, ctx.block_regex)
+            if ctx.discard_tool_calls:
+                logger.info("Dropped a tool call written while tools are disabled for this response")
+                func_calls = []
             parsed_tools: list[ResponseFunctionToolCall] = []
             for fc in func_calls:
                 try:
