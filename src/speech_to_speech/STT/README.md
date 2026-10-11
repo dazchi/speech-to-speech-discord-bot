@@ -108,6 +108,10 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
 - Supported languages and language behavior: as for `qwen3-asr`
 - About 0.15-0.5 s per utterance on Apple Silicon with the 1.7B model; on Mandarin speech recorded from
   Discord it was markedly more accurate than `mlx-audio-whisper` (large-v3-turbo) and did not loop.
+- Also serves `POST /v1/transcribe`, so a companion process can reuse the loaded model instead of loading
+  its own: body = 16 kHz mono 16-bit audio as `audio/pcm` or `audio/wav` (at most 30 s), optional query
+  parameters `language` and `prompt`; answers `{"text": ..., "language": ...}`. The clip does not enter
+  any conversation. Other STT backends answer 501.
 
 ### 8) OpenAI-compatible endpoint (`--stt openai`)
 

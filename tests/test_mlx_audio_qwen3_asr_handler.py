@@ -102,3 +102,13 @@ def test_cli_selects_the_backend_and_keeps_the_language_flag() -> None:
         "prompt": "Alex",
         "gen_kwargs": {"max_new_tokens": 256},
     }
+
+
+def test_transcribe_text_uses_the_request_language_and_prompt() -> None:
+    model = FakeModel("Hey Alex.", language=["English"])
+    handler = make_handler(model, language="zh", prompt="server context")
+    assert handler.transcribe_text(np.zeros(160, np.float32), "auto", "Hey Alex, 艾丽同学") == ("Hey Alex.", "en")
+    assert model.calls[-1]["system_prompt"] == "Hey Alex, 艾丽同学" and "language" not in model.calls[-1]
+    assert handler.transcribe_text(np.zeros(160, np.float32), "Chinese") == ("Hey Alex.", "zh")
+    assert model.calls[-1]["language"] == "Chinese" and model.calls[-1]["system_prompt"] == "server context"
+    assert model.lock_held == [True, True]

@@ -26,6 +26,7 @@ from speech_to_speech.api.openai_realtime.service import (
     PIPELINE_SAMPLE_RATE,
     build_error_event,
 )
+from speech_to_speech.api.openai_realtime.transcribe_endpoint import mount_transcribe
 from speech_to_speech.api.openai_realtime.transports import (
     SessionTransport,
     WebSocketTransport,
@@ -530,6 +531,7 @@ def create_app(
     app = FastAPI(lifespan=lifespan)
 
     llm_proxy_usage = mount_llm_proxy(app, llm_proxy_config)
+    mount_transcribe(app, (unit.handlers for unit in pool))
 
     def _claim_unit(transport: SessionTransport | None) -> PipelineUnit | None:
         """Atomically (between asyncio yield points) reserve the first idle unit.
