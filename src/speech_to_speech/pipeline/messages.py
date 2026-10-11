@@ -21,6 +21,7 @@ from openai.types.responses.response_function_tool_call import ResponseFunctionT
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from speech_to_speech.api.openai_realtime.runtime_config import RuntimeConfig
+from speech_to_speech.pipeline.history import ResponseHistory
 from speech_to_speech.pipeline.speaker_metadata import PendingSpeakerAttribution, SpeakerAttribution
 from speech_to_speech.pipeline.transcript_logging import log_exception
 from speech_to_speech.pipeline.visemes import Viseme
@@ -150,6 +151,8 @@ class LLMResponseChunk(PipelineMessage):
     represent arbitrary text/tool interleaving without losing order.
     """
 
+    history: ResponseHistory | None = Field(default=None, exclude=True, repr=False)
+
     tag: Literal["llm_response_chunk"] = "llm_response_chunk"
     parts: list[AssistantOutputPart] = Field(default_factory=list)
     text: str = ""
@@ -199,6 +202,8 @@ class EndOfResponse(PipelineMessage):
     reply short. An error takes precedence over this incomplete status.
     """
 
+    history: ResponseHistory | None = Field(default=None, exclude=True, repr=False)
+
     tag: Literal["end_of_response"] = "end_of_response"
     turn_id: str | None = None
     turn_revision: int | None = None
@@ -208,6 +213,7 @@ class EndOfResponse(PipelineMessage):
     status: Literal["completed", "incomplete"] = "completed"
     reason: ResponseIncompleteReason | None = None
     cleanup_only: bool = False
+    input_tool_call_ids: list[str] = Field(default_factory=list)
 
 
 # ── LMOutputProcessor → TTS ──────────────────────────────────────────
@@ -266,10 +272,9 @@ class AudioOutput(PipelineMessage):
 class ResponsePrefetchTransaction:
     """Commit irreversible chat cleanup only after a prefetch is claimed.
 
-    Generated assistant items are already provisional and can be rolled back
-    by response key. Image stripping and history trimming are not reversible,
-    so an unclaimed prefetch parks those operations here until the matching
-    standard ``response.create`` arrives.
+    A prefetch's history proposal waits here, unwritten, until the matching
+    standard ``response.create`` claims it. A discarded prefetch never
+    writes history.
     """
 
     def __init__(self) -> None:
