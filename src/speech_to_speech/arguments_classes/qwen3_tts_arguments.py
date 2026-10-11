@@ -120,8 +120,9 @@ class Qwen3TTSHandlerArguments:
         default=False,
         metadata={
             "help": "Convert Traditional Chinese to Simplified (OpenCC) before synthesis; Qwen3-TTS mispronounces "
-            "many Traditional characters. Only the spoken text changes, not the transcript. Requires "
-            "'speech-to-speech[t2s]'. Default is False."
+            "many Traditional characters. Only the spoken text changes, not the transcript. Text spoken in another "
+            "language, or containing Japanese kana, is not converted. Requires 'speech-to-speech[t2s]'. "
+            "Default is False."
         },
     )
     qwen3_tts_streaming_chunk_size: Optional[int] = field(

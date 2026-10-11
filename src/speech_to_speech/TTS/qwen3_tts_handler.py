@@ -68,6 +68,20 @@ CJK_CHARACTER_PATTERN = re.compile(
     r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff"
     r"\U00020000-\U0002fa1f]"
 )
+# Hiragana, katakana (incl. phonetic extensions) and half-width katakana: never used in Chinese text.
+_KANA = re.compile("[\u3040-\u30ff\u31f0-\u31ff\uff66-\uff9f]")
+
+
+def should_convert_t2s(text: str, language: str) -> bool:
+    """Whether ``--qwen3_tts_t2s`` applies: only to text spoken as Chinese.
+
+    Japanese shares many kanji with Traditional Chinese, so converting it would turn 東京 into 东京 and
+    日本語 into 日本语, and push the voice toward reading it as Mandarin. Text in another language, or
+    with kana in it, is left as is.
+    """
+    return language in ("auto", "chinese") and _KANA.search(text) is None
+
+
 QWEN3_LANGUAGE_ALIASES = {
     "zh": "chinese",
     "zh-cn": "chinese",
@@ -883,7 +897,7 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         console.print(f"[green]ASSISTANT: {text}")
 
         t2s_converter = getattr(self, "_t2s_converter", None)
-        if t2s_converter is not None:
+        if t2s_converter is not None and should_convert_t2s(text, request_language):
             text = t2s_converter.convert(text)
 
         logger.info("Qwen3-TTS language=%s (input_code=%s)", request_language, language_code)
