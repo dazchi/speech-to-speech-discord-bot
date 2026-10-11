@@ -17,10 +17,13 @@ speech-to-speech server. It only listens after a wake word:
 - Everyone shares **one conversation**: the bot keeps a single session with the server, and
   tells the model who is speaking each time.
 - Nothing is sent to the speech server until someone says the wake word. Wake-word detection
-  runs locally on CPU: each short utterance is transcribed with
-  [SenseVoice](https://k2-fsa.github.io/sherpa/onnx/sense-voice/index.html) via sherpa-onnx
-  (~50 ms per utterance; English, Mandarin, Cantonese, Japanese, Korean; ~240 MB model downloaded
-  on first start) and matched against the wake phrases. "Hey Alex, what time is it?" is sent to the
+  runs locally: each short utterance is transcribed with
+  [Qwen3-ASR 1.7B](https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-8bit) on MLX (~0.2 s per
+  utterance, ~2.5 GB, downloaded on first start), given the wake phrases as context, and matched
+  against them. The wake phrase has to come first, and very short sounds are ignored. Set
+  `WAKE_MODEL=mlx-community/Qwen3-ASR-0.6B-8bit` for a smaller model, or `WAKE_MODEL=sensevoice` for
+  [SenseVoice](https://k2-fsa.github.io/sherpa/onnx/sense-voice/index.html) on CPU (~50 ms, but it
+  missed about 4 in 10 wake phrases in real Discord audio). "Hey Alex, what time is it?" is sent to the
   server whole; a bare "Hey Alex" just opens the window and waits for the question.
 
 ```
@@ -78,7 +81,9 @@ Discord voice channel ──per-user audio──▶ bot ──wake word?──�
 - **Interruptions.** By default the active speaker can cut Alex off by talking. Set
   `ALLOW_INTERRUPTIONS=false` to make Alex finish: while it is thinking, searching or speaking,
   the speaker's audio is not sent to the server, so it neither stops the reply nor queues an
-  extra question.
+  extra question. Web searches are never interrupted, even with `ALLOW_INTERRUPTIONS=true`: from the
+  tool call until the answer is ready, what the speaker says is dropped; the answer itself can be
+  talked over as usual.
 - **Tools.** `web_search` is enabled when `SERPER_API_KEY` is set. Add your own modules with
   `TOOL_MODULES` using the same format as the server's `--tool-module`
   (`TOOLS` + async `execute_tool(name, arguments)`).

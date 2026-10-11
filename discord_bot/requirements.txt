@@ -2,7 +2,8 @@ discord.py[voice]==2.7.1
 # Voice receive with Discord's DAVE encryption is not in a release yet; pinned to
 # https://github.com/imayhaveborkedit/discord-ext-voice-recv/pull/54 until it is merged.
 discord-ext-voice-recv @ git+https://github.com/rdphillips7/discord-ext-voice-recv@ddd28601fe556f585b869e215f29c8236b95f88f
-sherpa-onnx>=1.13
+mlx-audio>=0.4.7  # Qwen3-ASR wake-word recognizer (Apple silicon)
+sherpa-onnx>=1.13  # SenseVoice, with WAKE_MODEL=sensevoice
 pypinyin
 numpy
 soxr

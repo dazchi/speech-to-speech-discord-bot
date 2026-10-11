@@ -80,7 +80,9 @@ class VoiceBot(discord.Client):
         super().__init__(intents=intents)
         self.config = config
         self.tree = app_commands.CommandTree(self)
-        self.wake = WakeWordRecognizer(config.models_dir, config.wake_words, config.wake_aliases)
+        self.wake = WakeWordRecognizer(
+            config.models_dir, config.wake_words, config.wake_aliases, model=config.wake_model
+        )
         self.controller = ConversationController(wake_timeout_s=config.wake_timeout_s, followup_s=config.followup_s)
         self.speaker = Speaker(lambda: self.voice, on_stopped=self.controller.playback_finished)
         self.handlers = SessionHandlers(self)
@@ -387,9 +389,11 @@ class VoiceBot(discord.Client):
 
     async def _route(self, user_id: int, state: UserAudio, server_pcm: bytes, wake_samples: np.ndarray) -> None:
         if self.controller.is_active_user(user_id):
-            if self.config.allow_interruptions or not self.controller.assistant_busy:
+            interruptible = self.config.allow_interruptions and not self.controller.searching
+            if interruptible or not self.controller.assistant_busy:
                 await self.session.send_audio(server_pcm)
-            # else: ALLOW_INTERRUPTIONS=false and Alex is thinking or speaking: the server never hears it
+            # else: Alex is busy and may not be interrupted (ALLOW_INTERRUPTIONS=false, or it is searching
+            # the web): the server never hears it
             return
         if not self.controller.is_idle:
             state.clear()  # someone else has the floor
@@ -435,7 +439,6 @@ class VoiceBot(discord.Client):
         logger.info("Listening to %s", name)
         self.handlers.speaker_announced = False  # a new person: label their next turn
         await self.session.set_speaker(name)
-        await self.session.clear_input()
         self.speaker.play(chime(rising=True))
         self.speaker.finish()
         # "Hey Alex, what time is it?" is sent whole; a bare "Hey Alex" just opens the window.
@@ -528,6 +531,9 @@ class SessionHandlers:
         # so close the audio stream here too; otherwise it would wait for more audio forever.
         self.bot.speaker.finish()
         self.bot.controller.response_finished(tools_pending=tools_pending)
+
+    def on_tool_call(self, name: str) -> None:
+        self.bot.controller.tool_call_started()
 
     def on_tools_done_without_follow_up(self) -> None:
         self.bot.controller.tools_done_without_follow_up()

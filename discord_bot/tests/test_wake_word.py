@@ -4,7 +4,7 @@ import subprocess
 import numpy as np
 import pytest
 from discord_bot.config import DEFAULT_WAKE_ALIASES, DEFAULT_WAKE_WORDS
-from discord_bot.wake_word import build_wake_pattern, find_wake
+from discord_bot.wake_word import build_wake_pattern, find_wake, speech_seconds, wake_context
 
 PATTERN = build_wake_pattern(DEFAULT_WAKE_WORDS, DEFAULT_WAKE_ALIASES)
 
@@ -20,6 +20,9 @@ PATTERN = build_wake_pattern(DEFAULT_WAKE_WORDS, DEFAULT_WAKE_ALIASES)
         ("嘿艾力克斯，现在几点？", "现在几点"),
         ("嗨，亞歷克斯", ""),
         ("Hey 艾力克斯 what's up", "what's up"),
+        ("hialex 你知道战斗陀螺吗？", "你知道战斗陀螺吗"),  # greeting glued to the name
+        ("嘿alex,你现在心情怎么样？", "你现在心情怎么样"),
+        ("Hello, hello. Hey Alex. Hi Alex.", "Hi Alex"),
     ],
 )
 def test_wake_phrases_match_and_return_the_rest(text, remainder):
@@ -42,6 +45,19 @@ def test_wake_phrases_match_and_return_the_rest(text, remainder):
 )
 def test_other_speech_does_not_wake(text):
     assert find_wake(PATTERN, text) is None
+
+
+def test_speech_gate_ignores_clicks_but_not_short_words():
+    rng = np.random.default_rng(0)
+    click = np.zeros(16000, np.float32)
+    click[:3200] = rng.normal(0, 0.3, 3200)  # 0.2 s burst
+    word = np.zeros(16000, np.float32)
+    word[:7200] = rng.normal(0, 0.05, 7200)  # 0.45 s of quiet speech
+    assert speech_seconds(click) < 0.3 <= speech_seconds(word)
+
+
+def test_wake_context_writes_phrases_out():
+    assert wake_context(["hey alex", "ok alex", "艾利同學", " "]) == "Hey Alex, OK Alex, 艾利同學"
 
 
 # ---- end to end on synthesized speech (macOS `say`); downloads the ~240 MB model once ----
@@ -111,6 +127,23 @@ def test_chinese_wake_phrase_matches_by_sound(matcher, text, remainder):
 @pytest.mark.parametrize("text", ["我今天头好痛", "同学们，大家好。", "我跟你说那个艾丽同学她今天没来", "Hey Alexa"])
 def test_chinese_wake_phrase_needs_to_come_first(matcher, text):
     assert matcher.find(text) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "我觉得要再调一下，你不然说 Hi Alex 好了。",  # talking about the bot, not to it
+        "你你你等下试着叫那个 Hey Alex，然后看他会不会回。",
+        "Hey Alex, OK Alex, Hi Alex, 艾丽同学。",  # the recognizer repeating its context on noise
+        "是的，OK Alex, Hi Alex, 艾丽同学。",
+    ],
+)
+def test_mentions_and_context_echoes_do_not_wake(matcher, text):
+    assert matcher.find(text) is None
+
+
+def test_repeating_the_same_wake_phrase_still_wakes(matcher):
+    assert matcher.find("Hi Alex, Hi Alex, Hey Alex.") is not None
 
 
 @pytest.mark.parametrize("voice", ["Meijia", "Tingting"])

@@ -6,10 +6,12 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from discord_bot.wake_word import DEFAULT_WAKE_MODEL
+
 BOT_DIR = Path(__file__).resolve().parent
 
 DEFAULT_INSTRUCTIONS = (
-    "You are Alex, a bad-tempered male voice assistant in a Discord voice channel.\n"
+    "You are Alex (陳艾莉), a bad-tempered male voice assistant in a Discord voice channel.\n"
     "\n"
     "Personality: grumpy, impatient and sarcastic. You grumble, tease and swear a little while you help. "
     "The bad temper is only your style of speaking, never a reason not to help.\n"
@@ -95,6 +97,7 @@ class BotConfig:
     voice: str | None = None
     wake_words: tuple[str, ...] = DEFAULT_WAKE_WORDS
     wake_aliases: tuple[str, ...] = DEFAULT_WAKE_ALIASES
+    wake_model: str = DEFAULT_WAKE_MODEL
     wake_timeout_s: float = 6.0
     followup_s: float = 8.0
     tool_modules: tuple[str, ...] = field(default_factory=tuple)
@@ -203,6 +206,7 @@ class BotConfig:
             voice=os.environ.get("BOT_VOICE", "").strip() or None,
             wake_words=_env_list("WAKE_WORDS", DEFAULT_WAKE_WORDS),
             wake_aliases=_env_list("WAKE_ALIASES", DEFAULT_WAKE_ALIASES),
+            wake_model=os.environ.get("WAKE_MODEL", "").strip() or DEFAULT_WAKE_MODEL,
             wake_timeout_s=_env_float("WAKE_TIMEOUT_SECONDS", cls.wake_timeout_s),
             followup_s=_env_float("FOLLOWUP_SECONDS", cls.followup_s),
             tool_modules=_env_list("TOOL_MODULES", default_tools),

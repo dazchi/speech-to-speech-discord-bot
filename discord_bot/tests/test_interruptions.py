@@ -81,3 +81,37 @@ def test_option_from_env(monkeypatch):
     assert BotConfig.from_env().allow_interruptions is False
     monkeypatch.delenv("ALLOW_INTERRUPTIONS")
     assert BotConfig.from_env().allow_interruptions is True
+
+
+async def test_searching_cannot_be_interrupted_even_when_interruptions_are_allowed():
+    bot = make_bot(True)
+    state = UserAudio()
+    bot.controller.response_started()
+    bot.controller.tool_call_started()  # web_search
+    bot.controller.response_finished(tools_pending=True)
+    await bot._route(1, state, b"while searching", np.zeros(320, np.float32))
+    bot.controller.response_started()  # the answer
+    await bot._route(1, state, b"while answering", np.zeros(320, np.float32))
+    bot.controller.playback_started()
+    bot.controller.response_finished()
+    await bot._route(1, state, b"over the answer", np.zeros(320, np.float32))
+    assert bot.session.audio == [b"over the answer"]  # the answer is still playing, but may be interrupted
+
+
+def test_searching_ends_if_the_tools_give_no_follow_up():
+    c = ConversationController(wake_timeout_s=6, followup_s=8)
+    c.wake(1, "alice")
+    c.response_started()
+    c.tool_call_started()
+    c.response_finished(tools_pending=True)
+    assert c.searching
+    c.tools_done_without_follow_up()
+    assert not c.searching
+
+
+def test_a_cut_off_tool_response_ends_searching():
+    c = ConversationController(wake_timeout_s=6, followup_s=8)
+    c.response_started()
+    c.tool_call_started()
+    c.response_finished(tools_pending=False)  # cancelled: no follow-up will come
+    assert not c.searching

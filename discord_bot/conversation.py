@@ -42,6 +42,8 @@ class ConversationController:
         self._responses_in_flight = 0
         self._tools_pending = False
         self._audio_playing = False
+        # From a tool call until the response with the answer is done (searching can take a while).
+        self._searching = False
 
     @property
     def is_idle(self) -> bool:
@@ -88,7 +90,17 @@ class ConversationController:
         """A response ended. ``tools_pending``: tool results will trigger a follow-up response."""
         self._responses_in_flight = max(0, self._responses_in_flight - 1)
         self._tools_pending = self._tools_pending or tools_pending
+        if not tools_pending:
+            self._searching = False
         self._restart_followup()
+
+    def tool_call_started(self) -> None:
+        self._searching = True
+
+    @property
+    def searching(self) -> bool:
+        """True from a tool call (e.g. web_search) until the response with the answer is done."""
+        return self._searching
 
     @property
     def assistant_busy(self) -> bool:
@@ -112,6 +124,7 @@ class ConversationController:
 
     def tools_done_without_follow_up(self) -> None:
         self._tools_pending = False
+        self._searching = False
         self._restart_followup()
 
     def _restart_followup(self) -> None:
@@ -132,3 +145,4 @@ class ConversationController:
         self._responses_in_flight = 0
         self._tools_pending = False
         self._audio_playing = False
+        self._searching = False

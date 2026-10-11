@@ -219,3 +219,17 @@ async def test_final_answer_leaves_out_the_per_reply_note():
     await _one_search_round(session, "r1")
     final = [e for e in ws.sent if e["type"] == "response.create"][0]["response"]
     assert "等我一下喔" not in final["instructions"]
+
+
+async def test_tool_calls_are_reported_to_the_bot():
+    session, _, events = make_session()
+    await session._dispatch(
+        {
+            "type": "response.function_call_arguments.done",
+            "response_id": "r",
+            "call_id": "c",
+            "name": "web_search",
+            "arguments": "{}",
+        }
+    )
+    assert ("on_tool_call", ("web_search",), {}) in events.log

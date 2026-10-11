@@ -35,6 +35,7 @@ class SessionEvents(Protocol):
     def on_speech_stopped(self) -> None: ...
     def on_response_created(self) -> None: ...
     def on_response_done(self, *, tools_pending: bool) -> None: ...
+    def on_tool_call(self, name: str) -> None: ...
     def on_tools_done_without_follow_up(self) -> None: ...
     def on_audio(self, pcm: bytes) -> None: ...
     def on_audio_done(self) -> None: ...
@@ -233,9 +234,6 @@ class RealtimeSession:
             }
         )
 
-    async def clear_input(self) -> None:
-        await self._send({"type": "input_audio_buffer.clear"})
-
     async def _dispatch(self, event: dict[str, Any]) -> None:
         kind = event.get("type")
         if kind == "input_audio_buffer.speech_started":
@@ -275,6 +273,7 @@ class RealtimeSession:
         arguments = event.get("arguments") or "{}"
         pending = self._calls.setdefault(response_id, _PendingCalls())
         pending.order.append(call_id)
+        self.events.on_tool_call(name)
         key = f"{name}:{_normalized_arguments(arguments)}"
         if key in self._searched:
             # The model repeated a search it already has results for: do not run it again,
