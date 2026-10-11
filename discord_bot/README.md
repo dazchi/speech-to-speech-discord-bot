@@ -87,12 +87,23 @@ Discord voice channel ──per-user audio──▶ bot ──wake word?──�
 - **Interruptions.** By default the active speaker can cut Alex off by talking. Set
   `ALLOW_INTERRUPTIONS=false` to make Alex finish: while it is thinking, searching or speaking,
   the speaker's audio is not sent to the server, so it neither stops the reply nor queues an
-  extra question. Web searches are never interrupted, even with `ALLOW_INTERRUPTIONS=true`: from the
-  tool call until the answer is ready, what the speaker says is dropped; the answer itself can be
+  extra question. Tool calls (web searches, reading channels) are never interrupted, even with
+  `ALLOW_INTERRUPTIONS=true`: from the tool call until the answer is ready, what the speaker says is dropped; the answer itself can be
   talked over as usual.
 - **Tools.** `web_search` is enabled when `SERPER_API_KEY` is set. Add your own modules with
   `TOOL_MODULES` using the same format as the server's `--tool-module`
-  (`TOOLS` + async `execute_tool(name, arguments)`).
+  (`TOOLS` + async `execute_tool(name, arguments)`; define `bind(bot)` to get the running bot).
+- **Reading the server.** Alex can list every channel the bot can see, by category (text, announcement,
+  voice and stage channels with who is in them, forums and threads), and read recent messages in any of
+  them, including voice-channel chats, threads and forum posts (archived ones too), optionally filtered by
+  a word or the last few hours, and sum up what is going on across the whole server in one step
+  (`recent_activity`): "what is everyone talking about?", "what did
+  people say in #general today?", "did anyone post about Beyblade?". This needs Discord's privileged
+  **Message Content intent**: in the [Developer Portal](https://discord.com/developers/applications),
+  open your application → Bot → Privileged Gateway Intents, and enable Message Content Intent (otherwise
+  the bot stops at startup with an explanation). Alex only sees channels its role can view, so hide a
+  channel from the bot's role to keep it private. To turn this off, set `TOOL_MODULES` without
+  `discord_bot.tools.discord_channels`.
 - **Tuning the wake word.** Set `AUDIO_DEBUG=1` to log what the bot hears from each person
   (`Heard <name> say '...'`) and record it to `discord_bot/debug_audio/`. If the name is
   misheard consistently (e.g. "Alec"), add that spelling to `WAKE_ALIASES`. Change the phrases

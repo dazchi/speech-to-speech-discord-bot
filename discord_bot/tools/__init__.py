@@ -3,6 +3,8 @@
 A tool module defines ``TOOLS`` (Realtime function definitions) and an async
 ``execute_tool(name, arguments)``. The result may be a plain value or an object with
 ``output`` and ``create_response`` attributes (like the project's ``ToolResult``).
+A module that needs the running bot (for example to read Discord channels) may also define
+``bind(bot)``, which the bot calls once at startup.
 """
 
 from __future__ import annotations
@@ -28,8 +30,10 @@ class ToolRegistry:
         self.definitions: list[dict[str, Any]] = []
         self._executors: dict[str, Callable[[str, dict[str, Any]], Awaitable[Any]]] = {}
         self._defaults: dict[str, bool] = {}
+        self._modules: list[Any] = []
         for module_name in module_names:
             module = import_module(module_name)
+            self._modules.append(module)
             default_create = bool(getattr(module, "CREATE_RESPONSE", True))
             for tool in module.TOOLS:
                 name = tool["name"]
@@ -39,6 +43,13 @@ class ToolRegistry:
                 self._executors[name] = module.execute_tool
                 self._defaults[name] = default_create
             logger.info("Loaded tools from %s: %s", module_name, [t["name"] for t in module.TOOLS])
+
+    def bind(self, bot: Any) -> None:
+        """Give tool modules that define ``bind(bot)`` access to the running bot."""
+        for module in self._modules:
+            bind = getattr(module, "bind", None)
+            if callable(bind):
+                bind(bot)
 
     async def run(self, name: str, raw_arguments: str) -> ToolOutcome:
         executor = self._executors.get(name)

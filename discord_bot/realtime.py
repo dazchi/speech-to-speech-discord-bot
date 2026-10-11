@@ -19,11 +19,17 @@ from discord_bot.tools import ToolOutcome, ToolRegistry
 logger = logging.getLogger(__name__)
 
 RECONNECT_DELAY_S = 5.0
-# Instructions for the last response of a question once searching is over (tools disabled).
+# Instructions for the last response of a question once tool calls are over (tools disabled).
 FINAL_ANSWER_NOTE = (
-    "The web search is finished. Answer now in one to three short spoken sentences using the search results "
-    "above. If they do not answer the question, say briefly that you could not find it. Do not call any tools "
-    "and do not write tool-call syntax."
+    "Your tool calls are finished. Answer now in one to three short spoken sentences using the results above. "
+    "If they do not answer the question, say briefly that you could not find it. Do not call any tools and do "
+    "not write tool-call syntax."
+)
+# Asked once more when the answer after tool calls said nothing (e.g. the model wrote another tool call
+# while tools were off, which the server removes).
+EMPTY_ANSWER_NOTE = (
+    "Your previous reply was empty: it only tried to call a tool. Tools are off now. Answer in plain spoken "
+    "words, from the results above, even if they are incomplete."
 )
 # If the follow-up response to a tool result has not started by then, stop waiting for it.
 FOLLOW_UP_TIMEOUT_S = 15.0
@@ -105,6 +111,9 @@ class RealtimeSession:
         self._force_answer = False
         self.allow_interruptions = allow_interruptions
         self._tool_rounds = 0
+        self._follow_ups: set[str] = set()  # responses that answer tool results
+        self._spoken: set[str] = set()  # responses that said something
+        self._empty_retry_used = False
 
     @property
     def connected(self) -> bool:
@@ -244,8 +253,12 @@ class RealtimeSession:
         elif kind == "response.created":
             if self._awaiting_follow_up:
                 self._awaiting_follow_up = False
+                self._follow_ups.add((event.get("response") or {}).get("id") or "")
                 logger.info("Follow-up response to the tool result started")
             self.events.on_response_created()
+        elif kind in ("response.output_audio_transcript.delta", "response.output_text.delta"):
+            if str(event.get("delta", "")).strip():
+                self._spoken.add(event.get("response_id") or "")
         elif kind == "response.output_audio.delta":
             self.events.on_audio(base64.b64decode(event.get("delta", "")))
         elif kind == "response.output_audio.done":
@@ -265,6 +278,7 @@ class RealtimeSession:
         self._tool_rounds = 0
         self._searched.clear()
         self._force_answer = False
+        self._empty_retry_used = False
 
     def _start_call(self, event: dict[str, Any]) -> None:
         response_id = event.get("response_id") or ""
@@ -287,8 +301,22 @@ class RealtimeSession:
         pending.tasks[call_id] = asyncio.create_task(self.tools.run(name, arguments))
 
     async def _finish_response(self, response: dict[str, Any]) -> None:
-        pending = self._calls.pop(response.get("id") or "", None)
+        response_id = response.get("id") or ""
+        pending = self._calls.pop(response_id, None)
+        follow_up, spoken = response_id in self._follow_ups, response_id in self._spoken
+        self._follow_ups.discard(response_id)
+        self._spoken.discard(response_id)
         if pending is None:
+            if follow_up and not spoken and response.get("status") == "completed":
+                if not self._empty_retry_used:
+                    # Answering tool results produced nothing to say: ask once more, so the user is not
+                    # left with silence and a conversation window that closes.
+                    self._empty_retry_used = True
+                    self.events.on_response_done(tools_pending=True)
+                    logger.warning("The answer to the tool results was empty; asking for it again")
+                    await self._request_final_answer(EMPTY_ANSWER_NOTE)
+                    return
+                logger.warning("The answer to the tool results was empty again; giving up on this question")
             self.events.on_response_done(tools_pending=False)
             return
         # Results are delivered even when the response was cut off (e.g. the user talked over it),
@@ -314,19 +342,13 @@ class RealtimeSession:
                 self._awaiting_follow_up = True
                 self._tool_rounds += 1
                 if self._tool_rounds >= self.max_tool_rounds or self._force_answer:
-                    # Stop search loops: the follow-up must answer with what it has, under instructions
-                    # without the search guide (so it is not cued to search or say the search sentence).
-                    instructions = self.instructions_for(
-                        self._speaker, f"{self.answer_instructions}\n\n{FINAL_ANSWER_NOTE}", with_note=False
-                    )
-                    await self._send(
-                        {"type": "response.create", "response": {"tool_choice": "none", "instructions": instructions}}
-                    )
+                    # Stop search loops: the follow-up must answer with what it has.
+                    await self._request_final_answer()
                     logger.info("Searching is over (%d rounds); requested the final answer", self._tool_rounds)
                 else:
                     await self._send({"type": "response.create"})
                     logger.info("Requested the follow-up response")
-                asyncio.create_task(self._follow_up_watchdog())
+                    asyncio.create_task(self._follow_up_watchdog())
                 return
         except asyncio.CancelledError:
             pass
@@ -334,6 +356,15 @@ class RealtimeSession:
             logger.warning("Could not deliver tool results: %s", exc)
         if follow_up:
             self.events.on_tools_done_without_follow_up()
+
+    async def _request_final_answer(self, extra_note: str = "") -> None:
+        """Ask for the answer with tools off, under instructions without the search guide (so the model is
+        not cued to search or say the search sentence)."""
+        note = f"{FINAL_ANSWER_NOTE}\n{extra_note}" if extra_note else FINAL_ANSWER_NOTE
+        instructions = self.instructions_for(self._speaker, f"{self.answer_instructions}\n\n{note}", with_note=False)
+        self._awaiting_follow_up = True
+        await self._send({"type": "response.create", "response": {"tool_choice": "none", "instructions": instructions}})
+        asyncio.create_task(self._follow_up_watchdog())
 
     async def _follow_up_watchdog(self) -> None:
         await asyncio.sleep(FOLLOW_UP_TIMEOUT_S)
@@ -348,6 +379,8 @@ class RealtimeSession:
                 task.cancel()
         self._calls.clear()
         self._awaiting_follow_up = False
+        self._follow_ups.clear()
+        self._spoken.clear()
 
 
 def _normalized_arguments(raw: str) -> str:

@@ -168,7 +168,7 @@ async def test_search_loop_is_cut_off_after_max_rounds():
     assert creates[0] == {"type": "response.create"}  # first follow-up may search again
     final = creates[1]["response"]  # then it must answer, with tools off and answer-only instructions
     assert final["tool_choice"] == "none"
-    assert "The web search is finished" in final["instructions"]
+    assert "Your tool calls are finished" in final["instructions"]
 
 
 async def test_new_question_resets_the_search_limit():
@@ -233,3 +233,53 @@ async def test_tool_calls_are_reported_to_the_bot():
         }
     )
     assert ("on_tool_call", ("web_search",), {}) in events.log
+
+
+async def _tool_round_then_follow_up(session, follow_up_id):
+    await session._dispatch(
+        {
+            "type": "response.function_call_arguments.done",
+            "response_id": "r1",
+            "call_id": "c1",
+            "name": "read_channel",
+            "arguments": "{}",
+        }
+    )
+    await session._dispatch({"type": "response.done", "response": {"id": "r1", "status": "completed"}})
+    await asyncio.sleep(0.02)
+    await session._dispatch({"type": "response.created", "response": {"id": follow_up_id}})
+
+
+async def test_an_empty_answer_after_tool_calls_is_asked_for_once_more():
+    session, ws, events = make_session()
+    session.max_tool_rounds = 1
+    await _tool_round_then_follow_up(session, "f1")
+    await session._dispatch({"type": "response.done", "response": {"id": "f1", "status": "completed"}})  # said nothing
+    creates = [e for e in ws.sent if e["type"] == "response.create"]
+    assert len(creates) == 2 and creates[1]["response"]["tool_choice"] == "none"
+    assert "Your previous reply was empty" in creates[1]["response"]["instructions"]
+    assert events.log[-1] == ("on_response_done", (), {"tools_pending": True})  # the window stays open
+
+    await session._dispatch({"type": "response.created", "response": {"id": "f2"}})
+    await session._dispatch({"type": "response.done", "response": {"id": "f2", "status": "completed"}})
+    assert len([e for e in ws.sent if e["type"] == "response.create"]) == 2  # only one retry
+    assert events.log[-1] == ("on_response_done", (), {"tools_pending": False})
+
+
+async def test_a_spoken_answer_after_tool_calls_is_not_repeated():
+    session, ws, events = make_session()
+    session.max_tool_rounds = 1
+    await _tool_round_then_follow_up(session, "f1")
+    await session._dispatch(
+        {"type": "response.output_audio_transcript.delta", "response_id": "f1", "delta": "台北今天晴天"}
+    )
+    await session._dispatch({"type": "response.done", "response": {"id": "f1", "status": "completed"}})
+    assert len([e for e in ws.sent if e["type"] == "response.create"]) == 1
+    assert events.log[-1] == ("on_response_done", (), {"tools_pending": False})
+
+
+async def test_an_ordinary_silent_reply_is_not_retried():
+    session, ws, _ = make_session()
+    await session._dispatch({"type": "response.created", "response": {"id": "x"}})
+    await session._dispatch({"type": "response.done", "response": {"id": "x", "status": "completed"}})
+    assert [e for e in ws.sent if e["type"] == "response.create"] == []

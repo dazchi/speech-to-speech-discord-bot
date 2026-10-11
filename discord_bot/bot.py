@@ -78,6 +78,8 @@ class VoiceBot(discord.Client):
     def __init__(self, config: BotConfig) -> None:
         intents = discord.Intents.default()
         intents.voice_states = True
+        # Privileged: reading channels with the Discord tools needs the text of messages.
+        intents.message_content = config.reads_discord_messages
         super().__init__(intents=intents)
         self.config = config
         self.tree = app_commands.CommandTree(self)
@@ -92,6 +94,7 @@ class VoiceBot(discord.Client):
         self.speaker = Speaker(lambda: self.voice, on_stopped=self.controller.playback_finished)
         self.handlers = SessionHandlers(self)
         tools = ToolRegistry(config.tool_modules)
+        tools.bind(self)
         self.session = RealtimeSession(
             config.s2s_url,
             config.session_instructions([t["name"] for t in tools.definitions]),
@@ -606,4 +609,11 @@ def main() -> None:
     voice_patches.apply()  # before joining a voice channel
     config = BotConfig.from_env()
     load_opus(config.opus_library)
-    VoiceBot(config).run(config.discord_token, log_handler=None)
+    try:
+        VoiceBot(config).run(config.discord_token, log_handler=None)
+    except discord.PrivilegedIntentsRequired:
+        raise SystemExit(
+            "Discord refused the Message Content intent, which the channel-reading tools need. Enable it in the "
+            "Discord Developer Portal (your application -> Bot -> Privileged Gateway Intents -> Message Content "
+            "Intent), or set TOOL_MODULES without discord_bot.tools.discord_channels."
+        ) from None
