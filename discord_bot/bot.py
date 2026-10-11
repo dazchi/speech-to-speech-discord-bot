@@ -21,12 +21,13 @@ from discord_bot import voice_patches
 from discord_bot.audio import WAKE_RATE, InputConverter, OutputConverter, chime, silence_server
 from discord_bot.channels import busiest_channel
 from discord_bot.chat import chat_label, clean_question, split_message
-from discord_bot.config import BotConfig
+from discord_bot.config import DJ_ALEX_MODULE, BotConfig
 from discord_bot.conversation import ConversationController
 from discord_bot.debug import AudioDebugger
+from discord_bot.ducking import MusicDucker
 from discord_bot.playback import Speaker
 from discord_bot.realtime import RealtimeSession
-from discord_bot.tools import ToolRegistry
+from discord_bot.tools import ToolRegistry, dj_alex
 from discord_bot.wake_word import WakeWordRecognizer
 
 logger = logging.getLogger("discord_bot")
@@ -122,7 +123,25 @@ class VoiceBot(discord.Client):
         self.greet_queue: asyncio.Queue[tuple[int, str]] = asyncio.Queue()
         self._last_greeted: dict[int, float] = {}
         self._joined_at: dict[int, float] = {}
+        self.ducker = self._music_ducker()
         self._register_commands()
+
+    def _music_ducker(self) -> MusicDucker | None:
+        """Turns DJ Alex's music down while Alex speaks, if DJ Alex is set up."""
+        level = self.config.duck_music_level
+        if DJ_ALEX_MODULE not in self.config.tool_modules or level >= 100 or not dj_alex.configured():
+            return None
+
+        async def send(down: bool) -> None:
+            await dj_alex.duck(level if down else None, ducker.hold_s)
+
+        ducker = MusicDucker(send, lambda: self.controller.assistant_busy)
+        return ducker
+
+    async def close(self) -> None:
+        if self.ducker is not None:
+            await self.ducker.close()
+        await super().close()
 
     # ---- startup and commands -------------------------------------------------------------
     async def setup_hook(self) -> None:
@@ -549,6 +568,8 @@ class SessionHandlers:
     def on_audio(self, pcm: bytes) -> None:
         if self.bot.speaker.play(self.bot.output.convert(pcm)):
             self.bot.controller.playback_started()  # the follow-up timer waits for playback to end
+            if self.bot.ducker is not None:
+                self.bot.ducker.speaking()
 
     def on_audio_done(self) -> None:
         self.bot.speaker.finish()

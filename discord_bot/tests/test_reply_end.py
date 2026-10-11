@@ -56,6 +56,7 @@ async def test_window_closes_after_reply_without_output_audio_done():
         controller=controller,
         speaker=speaker,
         output=SimpleNamespace(convert=lambda pcm: pcm),
+        ducker=None,
         loop=asyncio.get_running_loop(),
         session=SimpleNamespace(announce_speaker=announce_speaker, set_turn_note=lambda note: asyncio.sleep(0)),
         pick_turn_note=lambda: None,

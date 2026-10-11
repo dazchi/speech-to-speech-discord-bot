@@ -119,6 +119,11 @@ class RealtimeSession:
     def connected(self) -> bool:
         return self._ws is not None
 
+    @property
+    def speaker(self) -> str | None:
+        """Who Alex is talking to now."""
+        return self._speaker
+
     def instructions_for(self, speaker: str | None, base: str | None = None, *, with_note: bool = True) -> str:
         # The model does not know the date; it needs it for "today", and for search queries.
         today = datetime.now().astimezone().strftime("%Y-%m-%d (%A)")

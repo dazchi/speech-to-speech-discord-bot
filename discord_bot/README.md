@@ -104,6 +104,15 @@ Discord voice channel ──per-user audio──▶ bot ──wake word?──�
   the bot stops at startup with an explanation). Alex only sees channels its role can view, so hide a
   channel from the bot's role to keep it private. To turn this off, set `TOOL_MODULES` without
   `discord_bot.tools.discord_channels`.
+- **Playing music with [DJ Alex](https://github.com/dazchi/dj-alex).** Alex can play songs and albums from
+  DJ Alex's library, pause, skip, go back, stop, shuffle, change the volume and repeat, and say what is
+  playing: "play 晴天", "turn it down", "what song is this?". Set `CONTROL_TOKEN` in DJ Alex's `.env`
+  (for example `openssl rand -hex 32`) and restart it, then set `DJ_ALEX_URL` (e.g.
+  `http://192.168.1.20:3000`) and `DJ_ALEX_TOKEN` (the same token) here. Songs are queued as
+  "Alex (for <speaker>)", and DJ Alex joins Alex's voice channel if it is not in one. The bot ignores
+  other bots' audio, so the music does not wake it. While Alex answers, the music fades down to
+  `DUCK_MUSIC_LEVEL` percent (default 30; 100 turns this off) and comes back up a second after Alex is done.
+  This needs the same channel: music playing in another voice channel is left alone.
 - **Tuning the wake word.** Set `AUDIO_DEBUG=1` to log what the bot hears from each person
   (`Heard <name> say '...'`) and record it to `discord_bot/debug_audio/`. If the name is
   misheard consistently (e.g. "Alec"), add that spelling to `WAKE_ALIASES`. Change the phrases
