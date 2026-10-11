@@ -23,7 +23,10 @@ speech-to-speech server. It only listens after a wake word:
   against them. The wake phrase has to come first, and very short sounds are ignored. Set
   `WAKE_MODEL=mlx-community/Qwen3-ASR-0.6B-8bit` for a smaller model, or `WAKE_MODEL=sensevoice` for
   [SenseVoice](https://k2-fsa.github.io/sherpa/onnx/sense-voice/index.html) on CPU (~50 ms, but it
-  missed about 4 in 10 wake phrases in real Discord audio). "Hey Alex, what time is it?" is sent to the
+  missed about 4 in 10 wake phrases in real Discord audio). With the server on
+  `--stt mlx-audio-qwen3-asr`, set `WAKE_MODEL=server` so the bot loads no model and uses the server's
+  copy through `POST /v1/transcribe` instead: the same accuracy, ~2.3 GB less GPU memory (on a 32 GB Mac,
+  two copies next to a 35B LLM run the GPU out of memory). "Hey Alex, what time is it?" is sent to the
   server whole; a bare "Hey Alex" just opens the window and waits for the question.
 
 ```

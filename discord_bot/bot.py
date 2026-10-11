@@ -81,7 +81,11 @@ class VoiceBot(discord.Client):
         self.config = config
         self.tree = app_commands.CommandTree(self)
         self.wake = WakeWordRecognizer(
-            config.models_dir, config.wake_words, config.wake_aliases, model=config.wake_model
+            config.models_dir,
+            config.wake_words,
+            config.wake_aliases,
+            model=config.wake_model,
+            server_url=config.s2s_url,
         )
         self.controller = ConversationController(wake_timeout_s=config.wake_timeout_s, followup_s=config.followup_s)
         self.speaker = Speaker(lambda: self.voice, on_stopped=self.controller.playback_finished)

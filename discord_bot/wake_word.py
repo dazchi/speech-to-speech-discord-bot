@@ -7,7 +7,8 @@ Chinese phrases by pronunciation (pinyin).
 The default recognizer is Qwen3-ASR 1.7B (MLX, ~0.2 s per utterance), given the wake phrases as
 context so it spells the name the way the matcher expects. On recordings from Discord it caught 41 of
 41 wake phrases, where SenseVoice (sherpa-onnx, CPU) caught 24. SenseVoice stays available with
-``WAKE_MODEL=sensevoice``.
+``WAKE_MODEL=sensevoice``. ``WAKE_MODEL=server`` loads no model at all and sends each utterance to the
+speech server's ``/v1/transcribe`` instead, reusing its Qwen3-ASR (``--stt mlx-audio-qwen3-asr``).
 """
 
 from __future__ import annotations
@@ -19,7 +20,9 @@ import urllib.request
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
+import httpx
 import numpy as np
 
 from discord_bot.audio import WAKE_RATE
@@ -28,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WAKE_MODEL = "mlx-community/Qwen3-ASR-1.7B-8bit"
 SENSEVOICE = "sensevoice"
+SERVER = "server"  # use the speech server's recognizer (POST /v1/transcribe)
+SERVER_TIMEOUT_S = 30.0  # the server's GPU may be busy with a reply for a few seconds
 MODEL_NAME = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
 MODEL_URL = f"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{MODEL_NAME}.tar.bz2"
 
@@ -219,6 +224,50 @@ class _Qwen3ASR:
         return " ".join(str(result.text).split())
 
 
+def transcribe_url(s2s_url: str) -> str:
+    """The speech server's transcription endpoint, from its Realtime URL (ws://host:port/v1/realtime)."""
+    parts = urlsplit(s2s_url)
+    scheme = {"ws": "http", "wss": "https"}.get(parts.scheme, parts.scheme)
+    return urlunsplit((scheme, parts.netloc, "/v1/transcribe", "", ""))
+
+
+class _ServerASR:
+    """Transcribes on the speech server, so the bot does not load a second copy of the model."""
+
+    def __init__(self, url: str, context: str) -> None:
+        self._url = url
+        self._params = {"prompt": context} if context else {}
+        self._client = httpx.Client(timeout=SERVER_TIMEOUT_S)
+        self._failing = False
+        logger.info("Wake-word checks use the speech server's recognizer at %s", url)
+
+    def transcribe(self, samples: np.ndarray) -> str:
+        pcm = (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+        try:
+            response = self._client.post(
+                self._url, params=self._params, content=pcm, headers={"Content-Type": "audio/pcm"}
+            )
+        except httpx.HTTPError as exc:
+            return self._fail(f"cannot reach it ({exc})")
+        if response.status_code != 200:
+            try:
+                detail = str(response.json().get("error", ""))
+            except ValueError:
+                detail = response.text[:200]
+            return self._fail(f"HTTP {response.status_code}: {detail}")
+        if self._failing:
+            logger.info("Wake-word checks on the speech server work again")
+            self._failing = False
+        return str(response.json().get("text", ""))
+
+    def _fail(self, reason: str) -> str:
+        """Log once per outage instead of for every utterance; the utterance does not wake the bot."""
+        if not self._failing:
+            logger.warning("Wake-word check on the speech server failed: %s", reason)
+            self._failing = True
+        return ""
+
+
 class WakeWordRecognizer:
     def __init__(
         self,
@@ -226,19 +275,25 @@ class WakeWordRecognizer:
         phrases: Iterable[str],
         name_aliases: Iterable[str],
         model: str = DEFAULT_WAKE_MODEL,
+        server_url: str = "ws://127.0.0.1:8765/v1/realtime",
     ) -> None:
         phrases = tuple(phrases)
         self.matcher = WakeMatcher(phrases, name_aliases)
         # One thread owns the model: MLX models are used from the thread that loaded them.
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="wake-word")
 
-        def load() -> _SenseVoice | _Qwen3ASR:
-            if model.strip().lower() == SENSEVOICE:
+        choice = model.strip().lower()
+
+        def load() -> _SenseVoice | _Qwen3ASR | _ServerASR:
+            if choice == SERVER:
+                return _ServerASR(transcribe_url(server_url), wake_context(phrases))
+            if choice == SENSEVOICE:
                 return _SenseVoice(models_dir)
             return _Qwen3ASR(model, wake_context(phrases))
 
         self._backend = self._executor.submit(load).result()
-        self._executor.submit(self._backend.transcribe, np.zeros(WAKE_RATE, np.float32)).result()  # warm up
+        if choice != SERVER:  # the server may not be up yet; it warms up its own model
+            self._executor.submit(self._backend.transcribe, np.zeros(WAKE_RATE, np.float32)).result()
 
     def transcribe(self, samples: np.ndarray) -> str:
         """Blocking; call from a worker thread. ``samples``: 16 kHz mono float32."""
