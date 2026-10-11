@@ -49,9 +49,12 @@ Discord voice channel ──per-user audio──▶ bot ──wake word?──�
    `DISCORD_GUILD_ID` (see the file for the other options). Never commit `.env`.
 4. **Start the speech server** in another terminal, with `serve`, for example:
    ```bash
-   speech-to-speech serve --mac-optimal-settings --stt mlx-audio-whisper \
+   speech-to-speech serve --mac-optimal-settings --stt mlx-audio-qwen3-asr \
+     --mlx_audio_qwen3_asr_prompt "Alex, 艾丽同学, Discord" \
      --model_name mlx-community/Qwen3.6-35B-A3B-4bit
    ```
+   `mlx-audio-qwen3-asr` transcribes Mandarin from Discord much more accurately than
+   `mlx-audio-whisper`, and is as fast.
 5. **Run the bot** from the repository root:
    ```bash
    python -m discord_bot

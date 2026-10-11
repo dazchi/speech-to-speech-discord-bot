@@ -14,6 +14,7 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
 - `orukeet` → `STT/nemo_asr_handler.py`
 - `paraformer` → `STT/paraformer_handler.py`
 - `qwen3-asr` → `STT/qwen3_asr_handler.py`
+- `mlx-audio-qwen3-asr` → `STT/mlx_audio_qwen3_asr_handler.py`
 - `openai` → `STT/openai_compatible_handler.py`
 
 ## Language Support by Handler
@@ -94,6 +95,19 @@ This document summarizes the Speech-to-Text (STT) implementations in the `STT/` 
   - Progressive (partial) windows are short and fool the language ID, so they reuse the language of the last final turn
   - A forced language is passed on every request and reported as is
 - The required Transformers version supports the prompt and explicit language forcing on all platforms.
+- On Apple Silicon, prefer `--stt mlx-audio-qwen3-asr` (below): on MPS this backend's `auto` dtype is
+  float16, which produces garbage output; it only works there with `--qwen3_asr_torch_dtype float32`, and slowly.
+
+### 7b) MLX Audio Qwen3-ASR (`--stt mlx-audio-qwen3-asr`)
+
+- Handler: `MLXAudioQwen3ASRSTTHandler` (Qwen3-ASR on MLX through mlx-audio, Apple Silicon)
+- Model flag: `--mlx_audio_qwen3_asr_model_name` (default `mlx-community/Qwen3-ASR-1.7B-8bit`;
+  `mlx-community/Qwen3-ASR-0.6B-8bit` is faster and less accurate)
+- Language flag: `--language` (ISO code or name, default `auto`), the same flag as `mlx-audio-whisper`
+- Context flag: `--mlx_audio_qwen3_asr_prompt` (optional hotwords or domain context, e.g. names)
+- Supported languages and language behavior: as for `qwen3-asr`
+- About 0.15-0.5 s per utterance on Apple Silicon with the 1.7B model; on Mandarin speech recorded from
+  Discord it was markedly more accurate than `mlx-audio-whisper` (large-v3-turbo) and did not loop.
 
 ### 8) OpenAI-compatible endpoint (`--stt openai`)
 
@@ -235,6 +249,15 @@ speech-to-speech serve --stt qwen3-asr --qwen3_asr_language fr
 speech-to-speech serve --stt qwen3-asr \
   --qwen3_asr_model_name Qwen/Qwen3-ASR-1.7B-hf \
   --qwen3_asr_prompt "Vocabulary: Quilter, apostle."
+```
+
+### MLX Audio Qwen3-ASR
+
+```bash
+speech-to-speech serve --stt mlx-audio-qwen3-asr \
+  --mlx_audio_qwen3_asr_model_name mlx-community/Qwen3-ASR-1.7B-8bit \
+  --language auto \
+  --mlx_audio_qwen3_asr_prompt "Alex, Discord"
 ```
 
 ### Parakeet Unified

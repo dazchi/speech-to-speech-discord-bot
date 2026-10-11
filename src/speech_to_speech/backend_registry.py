@@ -19,6 +19,7 @@ from speech_to_speech.arguments_classes.faster_whisper_stt_arguments import (
 )
 from speech_to_speech.arguments_classes.kokoro_tts_arguments import KokoroTTSHandlerArguments
 from speech_to_speech.arguments_classes.language_model_arguments import LanguageModelHandlerArguments
+from speech_to_speech.arguments_classes.mlx_audio_qwen3_asr_arguments import MLXAudioQwen3ASRSTTHandlerArguments
 from speech_to_speech.arguments_classes.mlx_audio_whisper_arguments import (
     MLXAudioWhisperSTTHandlerArguments,
 )
@@ -470,6 +471,17 @@ STT_BACKENDS = build_backend_registry(
                 attach_speculative_turns=True,
             ),
             config_prefix="qwen3_asr",
+        ),
+        BackendSpec(
+            "mlx-audio-qwen3-asr",
+            "stt",
+            MLXAudioQwen3ASRSTTHandlerArguments,
+            _simple_handler_factory(
+                "speech_to_speech.STT.mlx_audio_qwen3_asr_handler",
+                "MLXAudioQwen3ASRSTTHandler",
+                attach_speculative_turns=True,
+            ),
+            config_prefix="mlx_audio_qwen3_asr",
         ),
         BackendSpec(
             "openai",
