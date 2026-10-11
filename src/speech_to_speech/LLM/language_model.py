@@ -953,7 +953,7 @@ class LanguageModelHandler(BaseLanguageModelHandler):
             def generate_mlx(system: str, user: str) -> str:
                 messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
                 prompt = tokenizer.apply_chat_template(  # type: ignore[union-attr]
-                    messages, tokenize=False, add_generation_prompt=True
+                    messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
                 )
                 with MLXLockContext(handler_name="MLX-compact", timeout=10.0):
                     return mlx_generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)  # type: ignore[arg-type]
@@ -1149,7 +1149,7 @@ class VisionLanguageModelHandler(BaseLanguageModelHandler):
             def generate_mlx(system: str, user: str) -> str:
                 messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
                 formatted_prompt = processor.apply_chat_template(  # type: ignore[union-attr]
-                    messages, tokenize=False, add_generation_prompt=True
+                    messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
                 )
                 with MLXLockContext(handler_name="MLX-VLM-compact", timeout=10.0):
                     token_iter = mlx_vlm_stream_generate(  # type: ignore[arg-type]
