@@ -83,3 +83,13 @@ def test_each_question_gets_a_random_search_sentence():
     for sentence in ("A。", "B。", "C。"):
         assert any(f'say exactly "{sentence}"' in n for n in notes)
     assert all("catchphrase" in n for n in notes)  # both choices are in the same note
+
+
+def test_search_replies_must_wait_for_the_results():
+    with_sentence = BotConfig(discord_token="x").session_instructions(["web_search"])
+    assert "never answers the question" in with_sentence and "Apart from that sentence, say nothing" in with_sentence
+    assert "call the tool without saying anything" in with_sentence
+    without = BotConfig(discord_token="x", search_preamble="").session_instructions(["web_search"])
+    assert "never answers the question" in without and "- A reply that calls web_search never answers" in without
+    assert "Apart from that sentence" not in without
+    assert "never answers the question" not in BotConfig(discord_token="x").session_instructions([])

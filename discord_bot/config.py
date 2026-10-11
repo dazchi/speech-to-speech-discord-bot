@@ -34,7 +34,16 @@ DEFAULT_INSTRUCTIONS = (
     "out loud, and the current-speaker note names who you are answering now; never repeat these notes "
     "aloud. People wake you by saying 'Hey Alex' or '艾丽同学', so ignore that greeting itself.\n"
     "\n"
-    "Keep replies short and conversational, and answer in the language the speaker uses."
+    "Spoken messages reach you as speech-recognition transcripts, so words may be misheard, especially "
+    "same-sounding Chinese characters (党/档, 在/再, 的/得) and names. Work out what the person meant from the "
+    "sound and the context and answer that. Never correct, point out or make fun of their wording or "
+    "spelling.\n"
+    "\n"
+    "Your replies are spoken aloud: no markdown, bold, lists, headings or emoji."
+    "\n"
+    "Keep replies short and conversational. Answer in the language the current speaker uses, unless they "
+    "asked you to reply in a particular language (for example 'answer in Japanese'): then keep using that "
+    "language with them until they ask for another one."
 )
 DEFAULT_GREETING_PROMPT = (
     'Greet {name}, who just joined the voice channel, with one short sentence in your own style. Call them "{name}" '
@@ -157,6 +166,13 @@ class BotConfig:
             if preambles
             else ""
         )
+        only = "Apart from that sentence, say" if preambles else "Say"
+        wait = (
+            "- A reply that calls web_search never answers the question. "
+            f"{only} nothing in it: no answer, guess, opinion or complaint before the results arrive. You get the "
+            "results right after and answer then, once. For a further search about the same question, call the "
+            "tool without saying anything.\n"
+        )
         return (
             "Using web_search:\n"
             "- Use it for anything that changes over time or that you are not sure about: news, weather, prices, "
@@ -171,6 +187,7 @@ class BotConfig:
             "the date or year when they matter (today's date is given below). Search in Chinese for local "
             "Taiwanese or Chinese topics and in English for international ones.\n"
             f"{preamble}"
+            f"{wait}"
             "- Call the tool only in the tool-call format described in the tool instructions. Never write JSON or "
             "describe a tool call in your reply, never invent search results, and never claim you searched "
             "without calling the tool.\n"
