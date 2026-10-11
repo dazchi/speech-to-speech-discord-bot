@@ -17,6 +17,7 @@ import numpy as np
 from discord import app_commands
 from discord.ext import voice_recv
 
+from discord_bot import voice_patches
 from discord_bot.audio import WAKE_RATE, InputConverter, OutputConverter, chime, silence_server
 from discord_bot.channels import busiest_channel
 from discord_bot.chat import chat_label, clean_question, split_message
@@ -602,6 +603,7 @@ def load_opus(path: str | None) -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("discord.ext.voice_recv").setLevel(logging.WARNING)
+    voice_patches.apply()  # before joining a voice channel
     config = BotConfig.from_env()
     load_opus(config.opus_library)
     VoiceBot(config).run(config.discord_token, log_handler=None)
