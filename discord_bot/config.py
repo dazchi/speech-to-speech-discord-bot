@@ -84,6 +84,11 @@ DJ_ALEX_GUIDE = (
     "queue numbers unless they ask.\n"
     "- If the song is not in the library, say so and, if it helps, mention a few close matches from "
     "search_music. If voiceChannel is null, DJ Alex is not in a voice channel, so nobody hears it: say so.\n"
+    "- Play right away (when now) only when they say play. When they ask to add or queue songs ('加到播放清單', "
+    "'排進去', 'queue'), use when end, so the current song keeps playing; for 'next' or '下一首', use when next. "
+    "Afterwards say it was queued, not that it is playing, unless placement is 'now playing' (nothing was playing).\n"
+    "- For the latest, newest or most recently added song(s) ('播最新的歌'), call play_music with latest (1, or how "
+    "many they asked for) and no query. To tell them what was added recently, call search_music with newest.\n"
     "- For 'louder' or 'quieter' without a number, use volume_change of about 15."
 )
 DEFAULT_WAKE_WORDS = ("hey alex", "ok alex", "okay alex", "hi alex", "hello alex", "艾利同學")
@@ -189,7 +194,7 @@ class BotConfig:
         """Per-question note naming the search sentence, when there are several to choose from."""
         if len(self.search_preambles) < 2:
             return None
-        return f'If you search for this question, first say exactly "{choice}".'
+        return f'If you call web_search for this question, first say exactly "{choice}" (never before other tools).'
 
     def catchphrase_note(self, use: bool) -> str | None:
         """Per-reply note telling the model whether to use a catchphrase this time."""
@@ -208,7 +213,8 @@ class BotConfig:
             sentence = "say exactly the search sentence given in the note for the current reply"
         preamble = (
             f"- Before the first web_search for a question, {sentence} and then call web_search right away in "
-            "the same reply. Never say it again for further searches about the same question.\n"
+            "the same reply. Never say it again for further searches about the same question, never before other "
+            "tools (music, channels), and never as an answer.\n"
             if preambles
             else ""
         )

@@ -184,3 +184,53 @@ def test_tool_descriptions_name_no_example_songs():
 async def test_volume_changes_carry_no_library_note(dj):
     dj.replies["/api/control/volume"] = httpx.Response(200, json={"ok": True, "volume": 30, "voiceChannel": "Lounge"})
     assert "note" not in await dj_alex.execute_tool("music_control", {"action": "volume", "volume": 30})
+
+
+async def test_play_the_latest_added_songs(dj):
+    await dj_alex.execute_tool("play_music", {"latest": 3, "query": "ignored"})
+    assert body(dj.requests[0]) == {"actor": "Alex (for Darren)", "channelId": "42", "position": "now", "latest": 3}
+    await dj_alex.execute_tool("play_music", {"latest": 99})
+    assert body(dj.requests[1])["latest"] == 20
+
+
+async def test_latest_play_reports_the_songs_with_the_library_note(dj):
+    songs = [{"title": "IRIS OUT", "artist": "AI Alex", "album": "", "added": "2026-10-11"}]
+    dj.replies["/api/control/play"] = httpx.Response(
+        200, json={**STATUS, "track": songs[0], "placement": "now playing", "picked": "latest", "songs": songs}
+    )
+    result = await dj_alex.execute_tool("play_music", {"latest": 1})
+    assert result["songs"] == songs and "exactly as given" in result["note"]
+
+
+async def test_search_music_lists_the_newest_songs(dj):
+    dj.replies["/api/control/search"] = httpx.Response(
+        200, json={"ok": True, "total": 1, "songs": [{"title": "味道", "artist": "AI Alex", "added": "2026-10-11"}]}
+    )
+    found = await dj_alex.execute_tool("search_music", {"newest": True})
+    assert dict(dj.requests[0].url.params) == {"q": "", "limit": "8", "sort": "recent"}
+    assert found["songs"] == [{"title": "味道", "artist": "AI Alex", "added": "2026-10-11"}]
+    assert found["order"] == "newest first"
+    assert "error" in await dj_alex.execute_tool("search_music", {})
+
+
+def test_guide_covers_the_latest_songs():
+    assert "play_music with latest" in BotConfig(discord_token="x").session_instructions(["play_music"])
+
+
+def test_queueing_is_described_for_the_model():
+    play = next(t for t in dj_alex.TOOLS if t["name"] == "play_music")
+    assert "加到播放清單" in play["parameters"]["properties"]["when"]["description"]
+    guide = BotConfig(discord_token="x").session_instructions(["play_music"])
+    assert "use when end" in guide and "use when next" in guide
+
+
+async def test_latest_songs_can_be_queued(dj):
+    await dj_alex.execute_tool("play_music", {"latest": 2, "when": "end"})
+    assert body(dj.requests[0])["position"] == "end" and body(dj.requests[0])["latest"] == 2
+
+
+async def test_skip_reports_only_the_song_that_plays_now(dj):
+    result = await dj_alex.execute_tool("music_control", {"action": "skip"})
+    assert result["nowPlaying"] == "晴天 by 周杰倫"
+    assert "upNext" not in result and "queueLength" not in result
+    assert "upNext" in await dj_alex.execute_tool("music_status", {})

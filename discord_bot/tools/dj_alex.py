@@ -26,10 +26,10 @@ TOOLS = [
         "type": "function",
         "name": "play_music",
         "description": (
-            "Play a song or album on DJ Alex, the music bot in this server, from its music library. Use it when "
-            "someone asks to play, put on or queue music. Pass the song title and/or artist exactly as they said "
+            "Play a song or album on DJ Alex, the music bot in this server, from its music library, or add it to "
+            "the queue. Use it when someone asks to play, put on or queue music. Pass the song title and/or artist exactly as they said "
             "it. If they did not name a song, album or artist, leave query out: DJ Alex then plays a random song "
-            "from its library."
+            "from its library. For the newest or most recently added songs, use latest instead of query."
         ),
         "parameters": {
             "type": "object",
@@ -41,13 +41,21 @@ TOOLS = [
                         "Leave it out when they did not name anything."
                     ),
                 },
+                "latest": {
+                    "type": "integer",
+                    "description": (
+                        "Play the most recently added songs, newest first: 1 for the latest song, or how many "
+                        "they asked for (up to 20). Leave query out when using it."
+                    ),
+                },
                 "album": {"type": "boolean", "description": "true to queue the whole album named in query."},
                 "when": {
                     "type": "string",
                     "enum": ["now", "next", "end"],
                     "description": (
-                        "now: play it right away (default when they say 'play'); next: after the current song; "
-                        "end: add it to the end of the queue."
+                        "now: play it right away, replacing the current song (when they say 'play'); next: "
+                        "play it after the current song ('play X next', '下一首放'); end: add it to the end of "
+                        "the queue ('add X to the queue', '加到播放清單', '排一首', 'queue X')."
                     ),
                 },
             },
@@ -91,12 +99,15 @@ TOOLS = [
         "name": "search_music",
         "description": (
             "Search DJ Alex's music library by title, artist or album, e.g. to answer 'what songs by X do we "
-            "have?' or to find the right song before play_music."
+            "have?' or to find the right song before play_music. Each song comes with the day it was added. "
+            "With newest, lists the most recently added songs first (leave query out for the newest in the library)."
         ),
         "parameters": {
             "type": "object",
-            "properties": {"query": {"type": "string", "description": "Title, artist or album keywords."}},
-            "required": ["query"],
+            "properties": {
+                "query": {"type": "string", "description": "Title, artist or album keywords."},
+                "newest": {"type": "boolean", "description": "true to list the most recently added songs first."},
+            },
             "additionalProperties": False,
         },
     },
@@ -135,11 +146,23 @@ def _requester() -> dict[str, Any]:
 
 def _summary(data: dict[str, Any]) -> dict[str, Any]:
     """The parts of DJ Alex's reply worth telling the model."""
-    keep = ("track", "placement", "album", "tracks", "status", "current", "upNext", "queueLength", "volume", "repeat")
+    keep = (
+        "track",
+        "placement",
+        "songs",
+        "album",
+        "tracks",
+        "status",
+        "current",
+        "upNext",
+        "queueLength",
+        "volume",
+        "repeat",
+    )
     result = {key: data[key] for key in keep if key in data and data[key] not in (None, [])}
     if not data.get("voiceChannel"):
         result["voiceChannel"] = None  # DJ Alex is not in a voice channel: nobody hears the music
-    if any(key in result for key in ("track", "album", "current", "upNext")):
+    if any(key in result for key in ("track", "songs", "album", "current", "upNext")):
         result["note"] = LIBRARY_NOTE
     return result
 
@@ -178,6 +201,12 @@ async def play_music(arguments: dict[str, Any]) -> dict[str, Any]:
     query = str(arguments.get("query") or "").strip()
     when = arguments.get("when") if arguments.get("when") in ("now", "next", "end") else "now"
     body = {**_requester(), "position": when}
+    if arguments.get("latest") is not None:
+        try:
+            latest = max(1, min(20, int(arguments["latest"])))
+        except (TypeError, ValueError):
+            latest = 1
+        return await _request("POST", "/api/control/play", {**body, "latest": latest})
     if arguments.get("album"):
         return await _request("POST", "/api/control/album", {**body, "name": query})
     return await _request("POST", "/api/control/play", {**body, "query": query})
@@ -203,18 +232,32 @@ async def music_control(arguments: dict[str, Any]) -> dict[str, Any]:
         if arguments.get("repeat") not in ("off", "one", "all"):
             return {"error": "repeat must be off, one or all"}
         body["mode"] = arguments["repeat"]
-    return await _request("POST", f"/api/control/{action}", body)
+    result = await _request("POST", f"/api/control/{action}", body)
+    if action in ("skip", "previous") and "error" not in result:
+        # Only the song that plays now: with the queue listed too, the model announced the song after it
+        # as "the next song".
+        result.pop("upNext", None)
+        result.pop("queueLength", None)
+        current = result.get("current")
+        result["nowPlaying"] = f"{current['title']} by {current['artist']}" if current else None
+    return result
 
 
 async def search_music(arguments: dict[str, Any]) -> dict[str, Any]:
-    query = str(arguments.get("query", "")).strip()
-    if not query:
-        return {"error": "query must be a non-empty string"}
-    page = await _call("GET", "/api/control/search", q=query, limit=SEARCH_RESULTS)
+    query = str(arguments.get("query") or "").strip()
+    newest = bool(arguments.get("newest"))
+    if not query and not newest:
+        return {"error": "give a query, or newest: true for the latest songs"}
+    params: dict[str, Any] = {"q": query, "limit": SEARCH_RESULTS}
+    if newest:
+        params["sort"] = "recent"
+    page = await _call("GET", "/api/control/search", **params)
     if "error" in page:
         return page
-    songs = [{key: t.get(key) for key in ("title", "artist", "album")} for t in page.get("songs", [])]
+    songs = [{key: t[key] for key in ("title", "artist", "album", "added") if key in t} for t in page.get("songs", [])]
     result: dict[str, Any] = {"query": query, "total": page.get("total", len(songs)), "songs": songs}
+    if newest:
+        result["order"] = "newest first"
     result["note"] = LIBRARY_NOTE if songs else "No songs in the library match."
     return result
 

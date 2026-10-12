@@ -105,6 +105,7 @@ class VoiceBot(discord.Client):
             max_tool_rounds=config.max_tool_rounds,
             allow_interruptions=config.allow_interruptions,
             answer_instructions=config.session_instructions([]),
+            search_preambles=config.search_preambles,
         )
         self.voice: voice_recv.VoiceRecvClient | None = None
         self.user_audio: dict[int, UserAudio] = {}
@@ -222,7 +223,10 @@ class VoiceBot(discord.Client):
         rng = getattr(self, "rng", random)
         notes = [self.config.catchphrase_note(rng.random() < self.config.catchphrase_rate)]
         if self.config.search_preambles:
-            notes.append(self.config.preamble_note(rng.choice(self.config.search_preambles)))
+            sentence = rng.choice(self.config.search_preambles)
+            notes.append(self.config.preamble_note(sentence))
+            if getattr(self, "session", None) is not None:
+                self.session.preamble = sentence  # said by the bot if the model skips it
         return "\n".join(n for n in notes if n) or None
 
     async def reply_in_chat(self, text: str) -> None:

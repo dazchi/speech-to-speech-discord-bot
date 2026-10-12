@@ -61,7 +61,7 @@ def test_multiple_search_preambles_are_named_in_the_per_reply_note():
     assert "the search sentence given in the note for the current reply" in guide
     assert (
         config.preamble_note("等我一下喔，我查一下。")
-        == 'If you search for this question, first say exactly "等我一下喔，我查一下。".'
+        == 'If you call web_search for this question, first say exactly "等我一下喔，我查一下。" (never before other tools).'
     )
 
 
