@@ -306,6 +306,22 @@ async def test_a_reply_that_only_promises_a_search_is_asked_to_search_once():
     assert events.log[-1] == ("on_response_done", (), {"tools_pending": False})
 
 
+async def test_a_reply_that_promises_music_without_a_tool_call_is_asked_for_the_call_once():
+    session, ws, events = make_session()
+    await _reply(session, "r1", "这首歌是周杰伦唱的。")  # no music tools loaded: never retried
+    assert [e for e in ws.sent if e["type"] == "response.create"] == []
+
+    session.tools.definitions = [{"type": "function", "name": "play_music"}]
+    await _reply(session, "r2", "好，这就帮你随机播放几首歌。")
+    creates = [e for e in ws.sent if e["type"] == "response.create"]
+    assert len(creates) == 1 and "called no tool" in creates[0]["response"]["instructions"]
+    assert events.log[-1] == ("on_response_done", (), {"tools_pending": True})
+
+    await _reply(session, "r3", "好，帮你播放。")  # again: no second retry
+    assert len([e for e in ws.sent if e["type"] == "response.create"]) == 1
+    assert events.log[-1] == ("on_response_done", (), {"tools_pending": False})
+
+
 async def test_a_reply_with_more_than_the_search_sentence_is_not_retried():
     session, ws, _ = make_session()
     session._preambles = {"我幫你查查看啦吼"}

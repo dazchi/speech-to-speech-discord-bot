@@ -90,6 +90,7 @@ class VoiceBot(discord.Client):
             config.wake_aliases,
             model=config.wake_model,
             server_url=config.s2s_url,
+            vad_threshold=config.wake_vad_threshold or None,
         )
         self.controller = ConversationController(wake_timeout_s=config.wake_timeout_s, followup_s=config.followup_s)
         self.speaker = Speaker(lambda: self.voice, on_stopped=self.controller.playback_finished)

@@ -20,7 +20,13 @@ speech-to-speech server. It only listens after a wake word:
   runs locally: each short utterance is transcribed with
   [Qwen3-ASR 1.7B](https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-8bit) on MLX (~0.2 s per
   utterance, ~2.5 GB, downloaded on first start), given the wake phrases as context, and matched
-  against them. The wake phrase has to come first, and very short sounds are ignored. Set
+  against them. The wake phrase has to come first, and very short sounds are ignored. Each utterance is
+  first checked with [Silero VAD](https://github.com/snakers4/silero-vad) (CPU, ~4 ms, a 2 MB model
+  downloaded on first start): given only noise, the recognizer can write out the wake phrases it was given
+  as context, and wake the bot. `WAKE_VAD_THRESHOLD` (default 0.5) sets how sure Silero must be that it
+  hears speech; 0 turns the check off. The context can also turn other speech into a wake phrase
+  (「嗯。」 came back as 「艾利同學。」), so a transcript with a wake phrase is checked once more without
+  it (~0.4 s) and wakes the bot only if the name is still there (「阿丽同学」 or "Hey, Alex" count). Set
   `WAKE_MODEL=mlx-community/Qwen3-ASR-0.6B-8bit` for a smaller model, or `WAKE_MODEL=sensevoice` for
   [SenseVoice](https://k2-fsa.github.io/sherpa/onnx/sense-voice/index.html) on CPU (~50 ms, but it
   missed about 4 in 10 wake phrases in real Discord audio). With the server on

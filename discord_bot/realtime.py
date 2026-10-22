@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import random
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -38,6 +39,19 @@ EMPTY_ANSWER_NOTE = (
 SEARCH_RETRY_NOTE = (
     "Your previous reply said you would look it up, but it called no tool. Call the tool the request needs now, "
     "in the tool-call format, without saying anything."
+)
+# Asked once when a reply said it would play or change the music but ended without calling a music tool.
+MUSIC_RETRY_NOTE = (
+    "Your previous reply said you would do something with the music, but it called no tool, so nothing "
+    "happened. Call the music tool the request needs now, in the tool-call format, without saying anything. "
+    "If the request needs no tool, say nothing."
+)
+MUSIC_TOOLS = frozenset({"play_music", "music_control"})
+# Words of a reply that claims a music action (play, skip, pause, volume, queue).
+MUSIC_PROMISE = re.compile(
+    r"播|放.{0,4}(歌|音樂|音乐|曲)|跳過|跳过|下一首|上一首|暫停|暂停|音量|大聲|大声|小聲|小声|"
+    r"\b(play|skip|pause|queue|volume|louder|quieter)",
+    re.IGNORECASE,
 )
 # Tools the search sentence is said before (not tools that act, such as music controls).
 SEARCH_TOOLS = frozenset({"web_search"})
@@ -418,6 +432,13 @@ class RealtimeSession:
         spoken = bool(said.strip()) and not (follow_up and _bare(said) in self._preambles)
         self._follow_ups.discard(response_id)
         if pending is None:
+            if not follow_up and self._only_promised_music(said) and response.get("status") == "completed":
+                # The model said it would play (skip, pause...) the music, then ended without the tool call.
+                self._search_retry_used = True
+                self.events.on_response_done(tools_pending=True)
+                logger.warning("The reply promised a music action but called no tool; asking for the tool call")
+                await self._request_search(MUSIC_RETRY_NOTE)
+                return
             if not follow_up and self._only_promised_a_search(said) and response.get("status") == "completed":
                 # The model said the search sentence, then ended without a tool call (or wrote one the
                 # server could not parse): ask once for the search, so the question is not left hanging.
@@ -540,8 +561,14 @@ class RealtimeSession:
     def _only_promised_a_search(self, said: str) -> bool:
         return not self._search_retry_used and bool(said.strip()) and _bare(said) in self._preambles
 
-    async def _request_search(self) -> None:
-        instructions = self.instructions_for(self._speaker, f"{self.base_instructions}\n\n{SEARCH_RETRY_NOTE}")
+    def _only_promised_music(self, said: str) -> bool:
+        if self._search_retry_used or not MUSIC_PROMISE.search(said):
+            return False
+        return any(tool.get("name") in MUSIC_TOOLS for tool in getattr(self.tools, "definitions", []))
+
+    async def _request_search(self, note: str = SEARCH_RETRY_NOTE) -> None:
+        """Ask once more for the tool call that the previous reply promised but did not make."""
+        instructions = self.instructions_for(self._speaker, f"{self.base_instructions}\n\n{note}")
         self._awaiting_follow_up = True
         self._search_requested = True
         await self._send({"type": "response.create", "response": {"instructions": instructions}})

@@ -37,7 +37,8 @@ def test_sends_pcm_with_the_wake_phrases_as_context(monkeypatch):
     assert requests == []  # no warm-up call: the server may not be up yet
     text = recognizer.transcribe(speech())
     assert recognizer.find_wake(text) == "现在几点"
-    (request,) = requests
+    request, plain = requests  # a wake phrase is checked again without the context
+    assert "prompt" not in plain.url.params
     assert request.url.path == "/v1/transcribe" and request.headers["content-type"] == "audio/pcm"
     assert "艾利同學" in request.url.params["prompt"] and "Hey Alex" in request.url.params["prompt"]
     assert len(request.content) == 32000  # 1 s of 16-bit samples
@@ -69,3 +70,77 @@ def test_unreachable_server_does_not_wake(monkeypatch):
         raise httpx.ConnectError("refused")
 
     assert make(monkeypatch, handler).transcribe(speech()) == ""
+
+
+class FakeVAD:
+    def __init__(self, seconds: float) -> None:
+        self.seconds = seconds
+
+    def speech_seconds(self, samples: np.ndarray) -> float:
+        return self.seconds
+
+
+def test_clips_without_speech_are_not_sent(monkeypatch):
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"text": "艾利同學。"})
+
+    recognizer = make(monkeypatch, handler)
+    recognizer._vad = FakeVAD(0.0)  # noise: the recognizer would answer with the context
+    assert recognizer.transcribe(speech()) == "" and requests == []
+    recognizer._vad = FakeVAD(1.0)
+    assert recognizer.transcribe(speech()) == "艾利同學。" and len(requests) == 2
+
+
+def test_wake_vad_is_on_by_default(monkeypatch):
+    from discord_bot.config import BotConfig
+
+    monkeypatch.setattr("discord_bot.config._load_dotenv", lambda: None)
+    monkeypatch.setenv("DISCORD_TOKEN", "x")
+    monkeypatch.delenv("WAKE_VAD_THRESHOLD", raising=False)
+    assert BotConfig.from_env().wake_vad_threshold == 0.5
+    monkeypatch.setenv("WAKE_VAD_THRESHOLD", "0")
+    assert BotConfig.from_env().wake_vad_threshold == 0
+
+
+def context_dependent(with_context: str, without: str):
+    """A server that writes ``with_context`` when given the wake phrases as context, else ``without``."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"text": with_context if "prompt" in request.url.params else without})
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    ("with_context", "without"),
+    [("艾利同學。", "嗯。"), ("艾利同學。", "Oh, duty."), ("Hello Alex.", "我。"), ("Hey Alex，艾利同學。", "")],
+)
+def test_a_wake_phrase_that_only_the_context_produced_does_not_wake(monkeypatch, with_context, without):
+    assert make(monkeypatch, context_dependent(with_context, without)).transcribe(speech()) == ""
+
+
+@pytest.mark.parametrize(
+    ("with_context", "without"),
+    [
+        ("艾利同學，今天天氣怎麼樣？", "阿丽同学，今天天气怎么样？"),
+        ("艾利同學。", "嗨，同学。"),
+        ("Hey Alex.", "Hey, Alex."),
+        ("Hey Alex, what time is it?", "Hey Alec, what time is it?"),
+    ],
+)
+def test_a_wake_phrase_whose_name_is_heard_without_the_context_wakes(monkeypatch, with_context, without):
+    recognizer = make(monkeypatch, context_dependent(with_context, without))
+    assert recognizer.transcribe(speech()) == with_context  # the transcript made with the context is kept
+
+
+def test_other_speech_is_transcribed_once(monkeypatch):
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"text": "我們晚點再說。"})
+
+    assert make(monkeypatch, handler).transcribe(speech()) == "我們晚點再說。" and len(requests) == 1

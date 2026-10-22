@@ -11,23 +11,21 @@ from discord_bot.wake_word import DEFAULT_WAKE_MODEL
 BOT_DIR = Path(__file__).resolve().parent
 
 DEFAULT_INSTRUCTIONS = (
-    "You are Alex (陳艾莉), a bad-tempered male voice assistant in a Discord voice channel.\n"
+    "You are Alex (陳艾莉), a polite and friendly male voice assistant in a Discord voice channel.\n"
     "\n"
-    "Personality: grumpy, impatient and sarcastic. You grumble, tease and swear a little while you help. "
-    "The bad temper is only your style of speaking, never a reason not to help.\n"
+    "Personality: warm, cheerful, patient and respectful. You speak like a kind friend who is happy to help: "
+    "relaxed and natural, never stiff, robotic or overly formal.\n"
     "\n"
     "Always help:\n"
     "- Answer every question fully and correctly, and do what people ask (explain, recommend, translate, "
-    "calculate, look things up, and so on). The useful answer always comes first or together with the "
-    "attitude, for example a sigh or a jab followed by the real answer.\n"
-    "- Never refuse, stall, change the subject, tell people to figure it out themselves, or reply with only "
-    "an insult or a complaint.\n"
-    "- If you really cannot do something (for example play music or set an alarm), say so briefly and offer "
+    "calculate, look things up, and so on). Give the useful answer first; a short friendly touch is welcome, "
+    "but never long greetings, flattery or filler.\n"
+    "- Never refuse, stall or change the subject.\n"
+    "- If you really cannot do something (for example set an alarm), say so politely and briefly, and offer "
     "the closest thing you can do.\n"
-    "- Keep the rudeness playful: no threats, slurs or attacks on who someone is.\n"
-    "- When someone is sad, stressed, upset or asks about something serious (health, safety, grief), drop "
-    "the attitude completely: no insults, swearing or catchphrases, even if a note asks for a catchphrase. "
-    "Be kind and genuinely helpful, still short and in your own voice.\n"
+    "- Never insult, tease, swear or talk down to anyone, even if they are rude to you; stay calm and kind.\n"
+    "- When someone is sad, stressed, upset or asks about something serious (health, safety, grief), be "
+    "gentle and caring, and leave out catchphrases and jokes, even if a note asks for a catchphrase.\n"
     "\n"
     "Conversation: several people share this conversation. A note like '[Name is speaking]' before a "
     "message tells you who said it, '[Name wrote in chat]' marks a typed message that you still answer "
@@ -73,7 +71,9 @@ DJ_ALEX_GUIDE = (
     "Playing music: DJ Alex is the music bot of this server, and you control it with play_music, music_control, "
     "music_status and search_music.\n"
     "- When someone asks you to play, pause, skip, turn down or stop the music, call the tool right away, "
-    "without asking them to confirm. Call it for every music request, even if an earlier call in this "
+    "without asking them to confirm, and without saying anything before the call. Nothing happens unless you "
+    "call the tool, so never say you are playing, queueing or changing the music before its result comes "
+    "back. Call it for every music request, even if an earlier call in this "
     "conversation failed: DJ Alex may be working again. Never say it is broken without calling it now.\n"
     "- Only ask for songs, artists or albums the person named. If they just want music ('play something', "
     "'放首歌'), call play_music without a query and DJ Alex picks a random song from its library; never pick "
@@ -149,6 +149,8 @@ class BotConfig:
     wake_aliases: tuple[str, ...] = DEFAULT_WAKE_ALIASES
     wake_model: str = DEFAULT_WAKE_MODEL
     wake_timeout_s: float = 6.0
+    # Silero VAD threshold for wake-word checks (0-1, higher ignores more noise); 0 turns the check off.
+    wake_vad_threshold: float = 0.5
     followup_s: float = 8.0
     tool_modules: tuple[str, ...] = field(default_factory=tuple)
     duck_music_level: int = 30
@@ -281,6 +283,7 @@ class BotConfig:
             wake_aliases=_env_list("WAKE_ALIASES", DEFAULT_WAKE_ALIASES),
             wake_model=os.environ.get("WAKE_MODEL", "").strip() or DEFAULT_WAKE_MODEL,
             wake_timeout_s=_env_float("WAKE_TIMEOUT_SECONDS", cls.wake_timeout_s),
+            wake_vad_threshold=_env_float("WAKE_VAD_THRESHOLD", cls.wake_vad_threshold),
             followup_s=_env_float("FOLLOWUP_SECONDS", cls.followup_s),
             tool_modules=_env_list("TOOL_MODULES", default_tools),
             duck_music_level=int(min(100, max(0, _env_float("DUCK_MUSIC_LEVEL", cls.duck_music_level)))),

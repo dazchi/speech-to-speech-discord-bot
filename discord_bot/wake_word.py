@@ -9,6 +9,15 @@ context so it spells the name the way the matcher expects. On recordings from Di
 41 wake phrases, where SenseVoice (sherpa-onnx, CPU) caught 24. SenseVoice stays available with
 ``WAKE_MODEL=sensevoice``. ``WAKE_MODEL=server`` loads no model at all and sends each utterance to the
 speech server's ``/v1/transcribe`` instead, reusing its Qwen3-ASR (``--stt mlx-audio-qwen3-asr``).
+
+Before transcribing, Silero VAD (sherpa-onnx, CPU, ~4 ms per utterance) checks that the utterance holds
+speech: given only noise or a murmur, the recognizer may write out the wake phrases it was given as
+context (a quiet "嗯" came back as 「艾利同學」), which woke the bot.
+
+The context also turns real speech into the wake phrase: 「嗯。」, 「Oh, duty.」 and 「啊，那个哪里？」 all came
+back as 「艾利同學。」. So a transcript with a wake phrase is checked once more without the context, and
+wakes the bot only if the name is still there (「阿丽同学」 or "Hey, Alex" count): on the recordings this
+dropped all 6 false wakes and kept 34 of 35 real ones.
 """
 
 from __future__ import annotations
@@ -35,6 +44,9 @@ SERVER = "server"  # use the speech server's recognizer (POST /v1/transcribe)
 SERVER_TIMEOUT_S = 30.0  # the server's GPU may be busy with a reply for a few seconds
 MODEL_NAME = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
 MODEL_URL = f"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{MODEL_NAME}.tar.bz2"
+VAD_MODEL_NAME = "silero_vad.onnx"
+VAD_MODEL_URL = f"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{VAD_MODEL_NAME}"
+DEFAULT_VAD_THRESHOLD = 0.5
 
 # Chinese greetings and renderings of the name that a recognizer may produce for "Hey Alex".
 CJK_GREETINGS = ("嘿", "嗨", "哈囉", "哈喽", "欸", "诶", "哎")
@@ -49,6 +61,7 @@ ECHO_PHRASES = 3
 # may "hear" the wake phrases it was given as context. The shortest real "Hey Alex" had 0.46 s.
 MIN_SPEECH_S = 0.3
 SPEECH_RMS = 0.01  # per 20 ms frame, on [-1, 1] audio
+MAX_CLIP_S = 20  # longest utterance the speech detector holds (the bot checks at most 15 s)
 _CJK = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
 _LATIN_WORD = re.compile(r"[A-Za-z]+")
 
@@ -121,6 +134,23 @@ class WakeMatcher:
         phrases = [p.strip() for p in phrases if p.strip()]
         self.pattern = build_wake_pattern([p for p in phrases if not _has_cjk(p)], name_aliases)
         self.chinese = [[s for s, _ in _syllables(p)] for p in phrases if _has_cjk(p)]
+        latin = {a.lower() for a in name_aliases if a.strip()}
+        latin.update(" ".join(p.lower().split()[1:]) or p.lower() for p in phrases if not _has_cjk(p))
+        alternatives = "|".join(sorted(map(re.escape, latin), key=len, reverse=True)) or "(?!)"
+        self.names = re.compile(rf"\b(?:{alternatives})\b", re.IGNORECASE)
+
+    def mentions_name(self, text: str) -> bool:
+        """Whether the name is anywhere in ``text``, however it is spelled: "Alex" (or a mishearing), a
+        Chinese rendering such as 艾力克斯, or the end of a Chinese wake phrase (同学 of 艾丽同学, any
+        characters with that sound)."""
+        if self.names.search(text) or any(name in text for name in CJK_NAMES):
+            return True
+        sounds = [s for s, _ in _syllables(text)]
+        for phrase in self.chinese:
+            tail = phrase[-2:]
+            if any(sounds[i : i + len(tail)] == tail for i in range(len(sounds) - len(tail) + 1)):
+                return True
+        return False
 
     def find(self, text: str) -> str | None:
         """Return what was said after the wake phrase ("" if nothing), or None if there is no wake phrase."""
@@ -192,6 +222,46 @@ def ensure_model(models_dir: Path) -> Path:
     return model_dir
 
 
+def ensure_vad_model(models_dir: Path) -> Path:
+    path = models_dir / VAD_MODEL_NAME
+    if not path.exists():
+        models_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("Downloading the Silero VAD model (~2 MB) to %s", models_dir)
+        partial = path.with_suffix(".part")
+        urllib.request.urlretrieve(VAD_MODEL_URL, partial)
+        partial.rename(path)
+    return path
+
+
+class SpeechDetector:
+    """Silero VAD: how much of a clip is speech, as opposed to noise, music or breathing."""
+
+    def __init__(self, models_dir: Path, threshold: float = DEFAULT_VAD_THRESHOLD) -> None:
+        import sherpa_onnx
+
+        config = sherpa_onnx.VadModelConfig()
+        config.silero_vad.model = str(ensure_vad_model(models_dir))
+        config.silero_vad.threshold = threshold
+        # Short limits: the clip is already one utterance, and "Hey Alex" is about half a second.
+        config.silero_vad.min_silence_duration = 0.1
+        config.silero_vad.min_speech_duration = 0.1
+        config.sample_rate = WAKE_RATE
+        self._window = config.silero_vad.window_size
+        self._vad = sherpa_onnx.VoiceActivityDetector(config, buffer_size_in_seconds=MAX_CLIP_S)
+
+    def speech_seconds(self, samples: np.ndarray) -> float:
+        """Not thread-safe: call from one thread."""
+        self._vad.reset()
+        for start in range(0, len(samples) - self._window + 1, self._window):
+            self._vad.accept_waveform(samples[start : start + self._window])
+        self._vad.flush()
+        total = 0
+        while not self._vad.empty():
+            total += len(self._vad.front.samples)
+            self._vad.pop()
+        return total / WAKE_RATE
+
+
 class _SenseVoice:
     def __init__(self, models_dir: Path) -> None:
         import sherpa_onnx
@@ -204,7 +274,9 @@ class _SenseVoice:
             num_threads=2,
         )
 
-    def transcribe(self, samples: np.ndarray) -> str:
+    uses_context = False
+
+    def transcribe(self, samples: np.ndarray, with_context: bool = True) -> str:
         stream = self._recognizer.create_stream()
         stream.accept_waveform(WAKE_RATE, samples)
         self._recognizer.decode_stream(stream)
@@ -218,9 +290,11 @@ class _Qwen3ASR:
         logger.info("Loading the wake-word speech model %s (downloaded on first start)", model_name)
         self._model = load(model_name)
         self._context = context or None
+        self.uses_context = self._context is not None
 
-    def transcribe(self, samples: np.ndarray) -> str:
-        result = self._model.generate(samples, max_tokens=128, system_prompt=self._context)
+    def transcribe(self, samples: np.ndarray, with_context: bool = True) -> str:
+        context = self._context if with_context else None
+        result = self._model.generate(samples, max_tokens=128, system_prompt=context)
         return " ".join(str(result.text).split())
 
 
@@ -237,15 +311,19 @@ class _ServerASR:
     def __init__(self, url: str, context: str) -> None:
         self._url = url
         self._params = {"prompt": context} if context else {}
+        self.uses_context = bool(context)
         self._client = httpx.Client(timeout=SERVER_TIMEOUT_S)
         self._failing = False
         logger.info("Wake-word checks use the speech server's recognizer at %s", url)
 
-    def transcribe(self, samples: np.ndarray) -> str:
+    def transcribe(self, samples: np.ndarray, with_context: bool = True) -> str:
         pcm = (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
         try:
             response = self._client.post(
-                self._url, params=self._params, content=pcm, headers={"Content-Type": "audio/pcm"}
+                self._url,
+                params=self._params if with_context else {},
+                content=pcm,
+                headers={"Content-Type": "audio/pcm"},
             )
         except httpx.HTTPError as exc:
             return self._fail(f"cannot reach it ({exc})")
@@ -276,7 +354,9 @@ class WakeWordRecognizer:
         name_aliases: Iterable[str],
         model: str = DEFAULT_WAKE_MODEL,
         server_url: str = "ws://127.0.0.1:8765/v1/realtime",
+        vad_threshold: float | None = None,
     ) -> None:
+        """``vad_threshold``: run Silero VAD first and transcribe only clips with speech (None: off)."""
         phrases = tuple(phrases)
         self.matcher = WakeMatcher(phrases, name_aliases)
         # One thread owns the model: MLX models are used from the thread that loaded them.
@@ -292,6 +372,11 @@ class WakeWordRecognizer:
             return _Qwen3ASR(model, wake_context(phrases))
 
         self._backend = self._executor.submit(load).result()
+        self._vad = (
+            self._executor.submit(SpeechDetector, models_dir, vad_threshold).result()
+            if vad_threshold is not None
+            else None
+        )
         if choice != SERVER:  # the server may not be up yet; it warms up its own model
             self._executor.submit(self._backend.transcribe, np.zeros(WAKE_RATE, np.float32)).result()
 
@@ -299,7 +384,21 @@ class WakeWordRecognizer:
         """Blocking; call from a worker thread. ``samples``: 16 kHz mono float32."""
         if speech_seconds(samples) < MIN_SPEECH_S:
             return ""
-        return self._executor.submit(self._backend.transcribe, samples).result().strip()
+        return self._executor.submit(self._transcribe_speech, samples).result().strip()
+
+    def _transcribe_speech(self, samples: np.ndarray) -> str:
+        # On the executor thread: it owns the model and the speech detector.
+        if self._vad is not None and self._vad.speech_seconds(samples) < MIN_SPEECH_S:
+            return ""
+        text = self._backend.transcribe(samples)
+        if not self._backend.uses_context or self.matcher.find(text) is None:
+            return text
+        # The wake phrases given as context can turn other speech into one: check without them.
+        plain = self._backend.transcribe(samples, with_context=False)
+        if not self.matcher.mentions_name(plain):
+            logger.info("Not a wake word: %r was %r without the wake-phrase context", text.strip(), plain.strip())
+            return ""
+        return text
 
     def find_wake(self, text: str) -> str | None:
         return self.matcher.find(text)

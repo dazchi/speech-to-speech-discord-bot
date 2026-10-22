@@ -157,3 +157,21 @@ def test_detects_spoken_chinese_wake_phrase(recognizer, tmp_path, voice, phrase)
 def test_ignores_spoken_chinese_speech(recognizer, tmp_path, text):
     heard = recognizer.transcribe(_speak(tmp_path, text, "Meijia"))
     assert recognizer.find_wake(heard) is None, heard
+
+
+@pytest.fixture(scope="module")
+def speech_detector():
+    pytest.importorskip("sherpa_onnx")
+    from discord_bot.config import BOT_DIR
+    from discord_bot.wake_word import SpeechDetector
+
+    return SpeechDetector(BOT_DIR / "models")
+
+
+def test_speech_detector_hears_speech_but_not_noise(speech_detector, tmp_path):
+    rng = np.random.default_rng(0)
+    assert speech_detector.speech_seconds(rng.normal(0, 0.05, 32000).astype(np.float32)) < 0.3  # loud hiss
+    assert speech_detector.speech_seconds(np.zeros(32000, np.float32)) == 0
+    if shutil.which("say") is None or shutil.which("afconvert") is None:
+        pytest.skip("needs macOS say/afconvert")
+    assert speech_detector.speech_seconds(_speak(tmp_path, "Hey Alex")) >= 0.3
